@@ -57,6 +57,33 @@ object MediaUtils {
         }
     }
 
+    suspend fun decodeUriToScaledBitmap(
+        context: Context,
+        uri: Uri,
+        maxDimension: Int = 1024
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            val input = context.contentResolver.openInputStream(uri) ?: return@withContext null
+            val original = input.use { BitmapFactory.decodeStream(it) } ?: return@withContext null
+            val scale = minOf(
+                maxDimension.toFloat() / original.width,
+                maxDimension.toFloat() / original.height,
+                1f
+            )
+            val targetW = (original.width * scale).toInt().coerceAtLeast(1)
+            val targetH = (original.height * scale).toInt().coerceAtLeast(1)
+            if (targetW != original.width || targetH != original.height) {
+                val scaled = Bitmap.createScaledBitmap(original, targetW, targetH, true)
+                original.recycle()
+                scaled
+            } else {
+                original
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun decodeBase64ToImageBitmap(base64: String?): ImageBitmap? {
         if (base64.isNullOrBlank()) return null
         return try {

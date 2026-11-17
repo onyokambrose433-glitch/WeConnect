@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.outlined.Chat
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Home
@@ -77,6 +78,7 @@ import com.example.data.crypto.WeConnectCrypto
 import com.example.data.model.Community
 import com.example.data.model.PublicProfile
 import com.example.data.model.UiState
+import com.example.data.remote.configureAppCheck
 import com.example.data.repository.AuthProfileRepository
 import com.example.data.repository.CommunityCallRepository
 import com.example.data.repository.MessagingRepository
@@ -91,8 +93,10 @@ import com.example.ui.chats.ChatThreadScreen
 import com.example.ui.chats.ChatsListScreen
 import com.example.ui.communities.CommunitiesScreen
 import com.example.ui.communities.CommunityDetailScreen
+import com.example.ui.components.GeminiAssistantDialog
 import com.example.ui.components.WeConnectLogoMark
 import com.example.ui.home.HomeScreen
+import com.example.ui.main.AiViewModel
 import com.example.ui.main.WeConnectViewModel
 import com.example.ui.profile.GlobalSearchDialog
 import com.example.ui.profile.ProfileScreen
@@ -113,6 +117,8 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Configure Firebase App Check with launch intent before any UI, ViewModels, or Firebase calls
+        configureAppCheck(this, intent)
         enableEdgeToEdge()
         setContent {
             WeConnectTheme {
@@ -289,12 +295,14 @@ private fun WeConnectShell(
 ) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val aiViewModel: AiViewModel = viewModel()
 
     var activeTab by rememberSaveable { mutableStateOf(MainTab.HOME) }
     var openChatId by rememberSaveable { mutableStateOf<String?>(null) }
     var openCommunityId by rememberSaveable { mutableStateOf<String?>(null) }
     var inspectUserUid by rememberSaveable { mutableStateOf<String?>(null) }
     var showSearchDialog by remember { mutableStateOf(false) }
+    var showGeminiDialog by remember { mutableStateOf(false) }
 
     val communitiesState by viewModel.communitiesState.collectAsStateWithLifecycle()
     val openCommunity: Community? = remember(openCommunityId, communitiesState) {
@@ -339,6 +347,7 @@ private fun WeConnectShell(
         ChatThreadScreen(
             chatId = openChatId!!,
             viewModel = viewModel,
+            aiViewModel = aiViewModel,
             myProfile = myProfile,
             onBack = { openChatId = null },
             onStartCall = startCallWithPeer
@@ -387,6 +396,12 @@ private fun WeConnectShell(
                             }
                         },
                         actions = {
+                            IconButton(
+                                onClick = { showGeminiDialog = true },
+                                modifier = Modifier.testTag("open_gemini_button")
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = "WeConnect AI (Gemini)", tint = WhatsAppTeal)
+                            }
                             IconButton(
                                 onClick = { showSearchDialog = true },
                                 modifier = Modifier.testTag("global_search_button")
@@ -473,7 +488,8 @@ private fun WeConnectShell(
                             MainTab.CHATS -> ChatsListScreen(
                                 viewModel = viewModel,
                                 myProfile = myProfile,
-                                onOpenChat = { openChatId = it }
+                                onOpenChat = { openChatId = it },
+                                onOpenGemini = { showGeminiDialog = true }
                             )
                             MainTab.COMMUNITIES -> CommunitiesScreen(
                                 viewModel = viewModel,
@@ -507,6 +523,13 @@ private fun WeConnectShell(
                 activeTab = MainTab.COMMUNITIES
                 openCommunityId = comm.id
             }
+        )
+    }
+
+    if (showGeminiDialog) {
+        GeminiAssistantDialog(
+            aiViewModel = aiViewModel,
+            onDismiss = { showGeminiDialog = false }
         )
     }
 

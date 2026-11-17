@@ -33,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
@@ -72,6 +73,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -94,8 +96,10 @@ import com.example.data.model.ChatMessage
 import com.example.data.model.Conversation
 import com.example.data.model.PublicProfile
 import com.example.data.model.UiState
+import com.example.ui.components.GeminiChatAssistSheet
 import com.example.ui.components.WeConnectAvatar
 import com.example.ui.components.formatTimeClock
+import com.example.ui.main.AiViewModel
 import com.example.ui.main.WeConnectViewModel
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CircleShape
@@ -120,6 +124,7 @@ import kotlinx.coroutines.launch
 fun ChatThreadScreen(
     chatId: String,
     viewModel: WeConnectViewModel,
+    aiViewModel: AiViewModel,
     myProfile: PublicProfile,
     onBack: () -> Unit,
     onStartCall: (PublicProfile, String) -> Unit
@@ -157,7 +162,9 @@ fun ChatThreadScreen(
     var searchInChat by remember { mutableStateOf(false) }
     var searchTerm by remember { mutableStateOf("") }
     var showChatInfo by remember { mutableStateOf(false) }
+    var showGeminiAssist by remember { mutableStateOf(false) }
     var playingVoiceId by remember { mutableStateOf<String?>(null) }
+    val decryptedCache = remember { mutableStateMapOf<String, String>() }
 
     // Voice note recorder
     val recorder = remember(context) { VoiceNoteRecorder(context) }
@@ -381,7 +388,11 @@ fun ChatThreadScreen(
                     }
                     LaunchedEffect(msg.id, msg.ciphertext, msg.edited, msg.deletedForAll, conv?.memberKeys) {
                         val c = conv ?: return@LaunchedEffect
-                        decryptedText = viewModel.messagingRepo.decryptMessageText(c, msg, myProfile.uid)
+                        val text = viewModel.messagingRepo.decryptMessageText(c, msg, myProfile.uid)
+                        decryptedText = text
+                        if (!msg.deletedForAll && msg.messageType == "TEXT" && text.isNotBlank()) {
+                            decryptedCache[msg.id] = "${msg.senderName}: $text"
+                        }
                     }
 
                     if (searchTerm.isNotBlank() && !decryptedText.contains(searchTerm, ignoreCase = true)) {
@@ -489,6 +500,12 @@ fun ChatThreadScreen(
                     ) {
                         Icon(Icons.Default.AttachFile, contentDescription = "Attach File", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    IconButton(
+                        onClick = { showGeminiAssist = true },
+                        modifier = Modifier.testTag("chat_gemini_assist_button")
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "Gemini Reply & Rewrite Assist", tint = WhatsAppTeal)
+                    }
                     OutlinedTextField(
                         value = inputText,
                         onValueChange = { inputText = it.take(1800) },
@@ -584,6 +601,20 @@ fun ChatThreadScreen(
                 }
             }
         }
+    }
+
+    if (showGeminiAssist) {
+        val recentLines = remember(messages, decryptedCache.size) {
+            messages.takeLast(6).mapNotNull { decryptedCache[it.id] }
+        }
+        GeminiChatAssistSheet(
+            aiViewModel = aiViewModel,
+            currentDraft = inputText,
+            recentConversationLines = recentLines,
+            myDisplayName = myProfile.displayName,
+            onApplyText = { inputText = it.take(1800) },
+            onDismiss = { showGeminiAssist = false }
+        )
     }
 
     // Forward Message Dialog
