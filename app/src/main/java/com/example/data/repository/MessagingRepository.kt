@@ -141,11 +141,11 @@ class MessagingRepository(
                     "type" to "DIRECT",
                     "title" to "",
                     "description" to "",
-                    "memberUids" to listOf(uid, peerProfile.uid),
-                    "adminUids" to listOf(uid, peerProfile.uid),
+                    "memberUids" to listOf(uid, peerProfile.uid).distinct(),
+                    "adminUids" to listOf(uid, peerProfile.uid).distinct(),
                     "memberNames" to mapOf(
-                        uid to myProfile.displayName,
-                        peerProfile.uid to peerProfile.displayName
+                        uid to myProfile.displayName.trim().ifBlank { "WeConnect User" }.take(50),
+                        peerProfile.uid to peerProfile.displayName.trim().ifBlank { "WeConnect User" }.take(50)
                     ),
                     "memberKeys" to keysMap,
                     "archivedBy" to emptyList<String>(),
@@ -276,8 +276,8 @@ class MessagingRepository(
             val payload = mapOf(
                 "chatId" to conversation.id,
                 "senderId" to uid,
-                "senderName" to senderProfile.displayName.take(60),
-                "memberUids" to conversation.memberUids,
+                "senderName" to senderProfile.displayName.trim().ifBlank { "WeConnect User" }.take(60),
+                "memberUids" to conversation.memberUids.distinct(),
                 "messageType" to messageType,
                 "ciphertext" to ciphertext,
                 "iv" to iv,

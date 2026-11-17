@@ -154,6 +154,12 @@ test("Conversations & End-to-End Encrypted Messages: member isolation & query al
   const ts = pastDate(5000);
   const chatId = "dm_alice_bob";
 
+  // Pre-creation existence check mirroring MessagingRepository.createOrOpenDirectChat
+  const beforeSnap = await assertSucceeds(aliceDb.collection("conversations").doc(chatId).get());
+  if (beforeSnap.exists) {
+    throw new Error("Expected DM conversation to not exist before creation");
+  }
+
   await assertSucceeds(
     aliceDb.collection("conversations").doc(chatId).set({
       type: "DIRECT",
@@ -172,33 +178,53 @@ test("Conversations & End-to-End Encrypted Messages: member isolation & query al
     })
   );
 
-  // Alice sends E2E encrypted message
+  // Alice sends E2E encrypted message and updates conversation metadata atomically
+  const batch = aliceDb.batch();
+  batch.set(aliceDb.collection("conversations").doc(chatId).collection("messages").doc("msg_1"), {
+    chatId,
+    senderId: ALICE_UID,
+    senderName: "Alice",
+    memberUids: [ALICE_UID, BOB_UID],
+    messageType: "TEXT",
+    ciphertext: "dGVzdGNpcGhlcnRleHQ=",
+    iv: "dGVzdGl2MTIzNDU2",
+    encrypted: true,
+    senderPublicKey: "pubA",
+    forwarded: false,
+    edited: false,
+    deletedForAll: false,
+    reactions: {},
+    readBy: [ALICE_UID],
+    deliveredTo: [ALICE_UID],
+    createdAt: ts,
+    updatedAt: ts,
+  });
+  batch.update(aliceDb.collection("conversations").doc(chatId), {
+    lastMessageText: "End-to-end encrypted message",
+    lastMessageSenderId: ALICE_UID,
+    lastMessageAt: pastDate(1000),
+    updatedAt: pastDate(1000),
+  });
+  await assertSucceeds(batch.commit());
+
+  // Alice updates typing status
   await assertSucceeds(
-    aliceDb.collection("conversations").doc(chatId).collection("messages").doc("msg_1").set({
-      chatId,
-      senderId: ALICE_UID,
-      senderName: "Alice",
+    aliceDb.collection("conversations").doc(chatId).collection("typing").doc(ALICE_UID).set({
+      uid: ALICE_UID,
+      displayName: "Alice",
       memberUids: [ALICE_UID, BOB_UID],
-      messageType: "TEXT",
-      ciphertext: "dGVzdGNpcGhlcnRleHQ=",
-      iv: "dGVzdGl2MTIzNDU2",
-      encrypted: true,
-      senderPublicKey: "pubA",
-      forwarded: false,
-      edited: false,
-      deletedForAll: false,
-      reactions: {},
-      readBy: [ALICE_UID],
-      deliveredTo: [ALICE_UID],
-      createdAt: ts,
-      updatedAt: ts,
+      typing: true,
+      updatedAt: pastDate(800),
     })
   );
 
-  // Bob can list conversations & messages with memberUids filter, and mark read
+  // Bob can list conversations, messages & typing with memberUids filter, and mark read
   await assertSucceeds(bobDb.collection("conversations").where("memberUids", "array-contains", BOB_UID).get());
   await assertSucceeds(
     bobDb.collection("conversations").doc(chatId).collection("messages").where("memberUids", "array-contains", BOB_UID).get()
+  );
+  await assertSucceeds(
+    bobDb.collection("conversations").doc(chatId).collection("typing").where("memberUids", "array-contains", BOB_UID).get()
   );
   await assertSucceeds(
     bobDb.collection("conversations").doc(chatId).collection("messages").doc("msg_1").update({
@@ -209,7 +235,7 @@ test("Conversations & End-to-End Encrypted Messages: member isolation & query al
     })
   );
 
-  // Charlie cannot read or send messages in Alice-Bob chat
+  // Charlie cannot read existing DM or send messages in Alice-Bob chat
   await assertFails(charlieDb.collection("conversations").doc(chatId).get());
   await assertFails(charlieDb.collection("conversations").get());
   await assertFails(

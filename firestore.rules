@@ -118,7 +118,7 @@ service cloud.firestore {
              data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
              data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 50 &&
              data.messageType in ['TEXT', 'IMAGE', 'VOICE', 'FILE', 'SYSTEM'] &&
-             data.ciphertext is string && data.ciphertext.size() <= 2500 &&
+             data.ciphertext is string && data.ciphertext.size() <= 4000 &&
              (!('iv' in data) || (data.iv is string && data.iv.size() <= 64)) &&
              data.encrypted is bool &&
              (!('senderPublicKey' in data) || (data.senderPublicKey is string && data.senderPublicKey.size() <= 512)) &&
@@ -352,7 +352,7 @@ service cloud.firestore {
 
     // --- 5. CONVERSATIONS, MESSAGES & TYPING ---
     match /conversations/{chatId} {
-      allow get: if isSignedIn() && isValidId(chatId) && request.auth.uid in existing().memberUids;
+      allow get: if isSignedIn() && isValidId(chatId) && (resource == null || request.auth.uid in existing().memberUids);
       allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
       allow create: if isSignedIn() &&
                        isValidId(chatId) &&
@@ -378,7 +378,7 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(chatId) && request.auth.uid in existing().adminUids;
 
       match /messages/{messageId} {
-        allow get: if isSignedIn() && isValidId(messageId) && request.auth.uid in existing().memberUids;
+        allow get: if isSignedIn() && isValidId(messageId) && (resource == null || request.auth.uid in existing().memberUids);
         allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
         allow create: if isSignedIn() &&
                          isValidId(messageId) &&
@@ -407,7 +407,7 @@ service cloud.firestore {
       }
 
       match /typing/{uid} {
-        allow get: if isSignedIn() && isValidId(uid) && request.auth.uid in existing().memberUids;
+        allow get: if isSignedIn() && isValidId(uid) && (resource == null || request.auth.uid in existing().memberUids);
         allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
         allow create, update: if isOwner(uid) &&
                                  isValidId(uid) &&
@@ -608,7 +608,7 @@ service cloud.firestore {
 
     // --- 9. VOICE & VIDEO CALL SIGNALING / HISTORY ---
     match /calls/{callId} {
-      allow get: if isSignedIn() && isValidId(callId) && request.auth.uid in existing().participantUids;
+      allow get: if isSignedIn() && isValidId(callId) && (resource == null || request.auth.uid in existing().participantUids);
       allow list: if isSignedIn() && request.auth.uid in existing().participantUids;
       allow create: if isSignedIn() &&
                        isValidId(callId) &&
