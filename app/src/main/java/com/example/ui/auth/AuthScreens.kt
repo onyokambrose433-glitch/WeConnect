@@ -6,17 +6,20 @@ import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,10 +31,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AlternateEmail
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Public
@@ -67,8 +71,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
@@ -226,10 +233,10 @@ fun AuthPhotoBackdrop(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            0.0f to PureWhite.copy(alpha = 0.08f),
-                            0.35f to WhatsAppLightBg.copy(alpha = 0.24f),
-                            0.68f to WhatsAppLightBg.copy(alpha = 0.76f),
-                            1.0f to PureWhite.copy(alpha = 0.94f)
+                            0.0f to PureWhite.copy(alpha = 0.04f),
+                            0.42f to WhatsAppLightBg.copy(alpha = 0.18f),
+                            0.68f to WhatsAppLightBg.copy(alpha = 0.72f),
+                            1.0f to PureWhite.copy(alpha = 0.96f)
                         )
                     )
             )
@@ -259,44 +266,50 @@ fun AuthScreen(
     }
 
     AuthPhotoBackdrop {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .systemBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .systemBarsPadding(),
             contentAlignment = Alignment.BottomCenter
         ) {
+            val isWide = maxWidth >= 600.dp
+            val heroSpacerHeight = (maxHeight * 0.24f).coerceIn(40.dp, 220.dp)
+
             Column(
                 modifier = Modifier
-                    .widthIn(max = 460.dp)
-                    .fillMaxWidth()
+                    .fillMaxSize()
                     .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Brand badge floating cleanly so the photo remains prominent above
+                // Top floating brand & privacy pills over the clear photo hero
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Start
+                    modifier = Modifier
+                        .widthIn(max = 520.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = PureWhite.copy(alpha = 0.92f),
+                        shape = RoundedCornerShape(22.dp),
+                        color = PureWhite.copy(alpha = 0.93f),
                         shadowElevation = 4.dp,
-                        border = BorderStroke(1.dp, WhatsAppTeal.copy(alpha = 0.14f))
+                        border = BorderStroke(1.dp, WhatsAppTeal.copy(alpha = 0.12f))
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
                         ) {
                             Image(
                                 painter = painterResource(id = R.drawable.weconnect_logo),
                                 contentDescription = "WeConnect Logo",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .size(30.dp)
+                                    .clip(RoundedCornerShape(8.dp))
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "WeConnect",
                                 style = MaterialTheme.typography.titleMedium,
@@ -305,84 +318,128 @@ fun AuthScreen(
                             )
                         }
                     }
+
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = PureWhite.copy(alpha = 0.90f),
+                        shadowElevation = 3.dp,
+                        border = BorderStroke(1.dp, WhatsAppGreen.copy(alpha = 0.30f))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(WhatsAppGreen)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Private & Live",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = WhatsAppInkDark,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(140.dp))
+                Spacer(modifier = Modifier.heightIn(min = heroSpacerHeight))
 
+                // Sleek Bottom Welcome & Sign-In Panel
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(28.dp),
-                    color = PureWhite.copy(alpha = 0.94f),
-                    tonalElevation = 2.dp,
-                    shadowElevation = 8.dp,
-                    border = BorderStroke(1.dp, WhatsAppTeal.copy(alpha = 0.14f))
+                    modifier = Modifier
+                        .widthIn(max = 480.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = if (isWide) 24.dp else 0.dp, vertical = if (isWide) 20.dp else 0.dp),
+                    shape = if (isWide) RoundedCornerShape(28.dp) else RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+                    color = PureWhite.copy(alpha = 0.96f),
+                    shadowElevation = 12.dp,
+                    border = BorderStroke(1.dp, WhatsAppTeal.copy(alpha = 0.10f))
                 ) {
                     Column(
-                        modifier = Modifier.padding(22.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .width(38.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(WhatsAppTeal.copy(alpha = 0.18f))
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
                         Text(
-                            text = "Welcome to WeConnect",
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = WhatsAppTeal,
-                            fontWeight = FontWeight.Bold,
+                            text = buildAnnotatedString {
+                                withStyle(SpanStyle(color = WhatsAppInkDark)) {
+                                    append("Welcome to ")
+                                }
+                                withStyle(SpanStyle(color = WhatsAppTeal)) {
+                                    append("WeConnect")
+                                }
+                            },
+                            style = MaterialTheme.typography.headlineMedium,
                             textAlign = TextAlign.Center
                         )
+
                         Spacer(modifier = Modifier.height(6.dp))
+
                         Text(
-                            text = "Private encrypted messaging, communities, and calls — clean, fast, and connected.",
+                            text = "Message friends privately, share moments & stories, and chat with Gemini AI — all in one place.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = WhatsAppMutedGray,
                             textAlign = TextAlign.Center
                         )
 
-                        Spacer(modifier = Modifier.height(18.dp))
+                        Spacer(modifier = Modifier.height(20.dp))
 
-                        Surface(
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(18.dp),
-                            color = WhatsAppLightBg,
-                            border = BorderStroke(1.dp, WhatsAppTeal.copy(alpha = 0.08f))
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            Column(
-                                modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                AuthFeatureRow(
-                                    icon = Icons.Default.Lock,
-                                    title = "End-to-End Encrypted Chats",
-                                    subtitle = "Per-device P-256 ECDH & AES-256-GCM keys keep direct conversations private."
-                                )
-                                AuthFeatureRow(
-                                    icon = Icons.Default.Public,
-                                    title = "Social Feed & 24h Status",
-                                    subtitle = "Share posts, status updates, reactions, and connect with real people."
-                                )
-                                AuthFeatureRow(
-                                    icon = Icons.Default.Groups,
-                                    title = "Communities, Channels & Calls",
-                                    subtitle = "Create communities, announcement channels, and real-time voice/video calls."
-                                )
+                            AuthFeatureRow(
+                                icon = Icons.Default.Lock,
+                                title = "End-to-End Encrypted",
+                                subtitle = "Private 1-to-1 and group chats secured per device."
+                            )
+                            AuthFeatureRow(
+                                icon = Icons.Default.Public,
+                                title = "Feed, Stories & Communities",
+                                subtitle = "Share posts, 24h status updates, and voice notes."
+                            )
+                            AuthFeatureRow(
+                                icon = Icons.Default.AutoAwesome,
+                                title = "Powered by Gemini AI",
+                                subtitle = "Instant smart replies, translations, and visual Q&A."
+                            )
+                        }
+
+                        AnimatedVisibility(visible = errorMessage != null) {
+                            Column {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                    border = BorderStroke(1.dp, WhatsAppCallRed.copy(alpha = 0.35f)),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text(
+                                        text = errorMessage.orEmpty(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        modifier = Modifier.padding(12.dp)
+                                    )
+                                }
                             }
                         }
 
-                        if (errorMessage != null) {
-                            Spacer(modifier = Modifier.height(14.dp))
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                                border = BorderStroke(1.dp, WhatsAppCallRed.copy(alpha = 0.4f))
-                            ) {
-                                Text(
-                                    text = errorMessage!!,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(18.dp))
+                        Spacer(modifier = Modifier.height(22.dp))
 
                         Button(
                             onClick = {
@@ -411,10 +468,11 @@ fun AuthScreen(
                                 containerColor = WhatsAppTeal,
                                 contentColor = PureWhite
                             ),
-                            shape = RoundedCornerShape(24.dp),
+                            shape = RoundedCornerShape(28.dp),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(52.dp)
+                                .height(54.dp)
                                 .testTag("google_sign_in_button")
                         ) {
                             if (isLoading) {
@@ -424,12 +482,13 @@ fun AuthScreen(
                                     strokeWidth = 2.5.dp
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
-                                Text("Connecting securely…")
+                                Text("Connecting securely…", fontWeight = FontWeight.SemiBold)
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.VerifiedUser,
                                     contentDescription = null,
-                                    tint = WhatsAppGreen
+                                    tint = WhatsAppGreen,
+                                    modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
@@ -437,16 +496,36 @@ fun AuthScreen(
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null,
+                                    tint = PureWhite.copy(alpha = 0.9f),
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "Every user creates an authentic profile secured by Firebase Authentication and Firestore rules.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = WhatsAppMutedGray,
-                            textAlign = TextAlign.Center
-                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = WhatsAppGreen,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Protected by Google Sign-In & Firebase security",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = WhatsAppMutedGray,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
             }
@@ -461,13 +540,14 @@ private fun AuthFeatureRow(
     subtitle: String
 ) {
     Row(
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(36.dp)
+                .size(40.dp)
                 .clip(CircleShape)
                 .background(WhatsAppNavIndicatorLight)
         ) {
@@ -475,7 +555,7 @@ private fun AuthFeatureRow(
                 imageVector = icon,
                 contentDescription = null,
                 tint = WhatsAppTeal,
-                modifier = Modifier.size(19.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
         Column(modifier = Modifier.weight(1f)) {
