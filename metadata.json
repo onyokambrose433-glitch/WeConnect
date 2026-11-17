@@ -1,0 +1,6 @@
+{
+  "name": "WeConnect",
+  "description": "A secure, modern global messaging and social networking Android application with real-time chats, groups, social feed, stories, communities, and calling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
