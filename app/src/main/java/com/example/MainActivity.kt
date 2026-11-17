@@ -81,6 +81,7 @@ import com.example.data.repository.AuthProfileRepository
 import com.example.data.repository.CommunityCallRepository
 import com.example.data.repository.MessagingRepository
 import com.example.data.repository.SocialRepository
+import com.example.ui.auth.AuthPhotoBackdrop
 import com.example.ui.auth.AuthScreen
 import com.example.ui.auth.OnboardingProfileScreen
 import com.example.ui.auth.signOutWithCleanup
@@ -96,8 +97,8 @@ import com.example.ui.main.WeConnectViewModel
 import com.example.ui.profile.GlobalSearchDialog
 import com.example.ui.profile.ProfileScreen
 import com.example.ui.profile.UserPublicProfileDialog
+import com.example.ui.theme.PureWhite
 import com.example.ui.theme.WeConnectTheme
-import com.example.ui.theme.WhatsAppEmerald
 import com.example.ui.theme.WhatsAppTeal
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
@@ -205,34 +206,57 @@ private fun AuthenticatedRoot(
 
     when (val state = myProfileState) {
         is UiState.Loading -> {
-            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                Column(
+            AuthPhotoBackdrop {
+                Box(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    contentAlignment = Alignment.Center
                 ) {
-                    WeConnectLogoMark(size = 72.dp)
-                    Spacer(Modifier.height(16.dp))
-                    CircularProgressIndicator(color = WhatsAppEmerald)
+                    Surface(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                        color = PureWhite.copy(alpha = 0.92f),
+                        shadowElevation = 6.dp
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 28.dp, vertical = 24.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            WeConnectLogoMark(size = 72.dp)
+                            Spacer(Modifier.height(16.dp))
+                            CircularProgressIndicator(color = WhatsAppTeal)
+                        }
+                    }
                 }
             }
         }
         is UiState.Error -> {
-            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                Column(
+            AuthPhotoBackdrop {
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(24.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    contentAlignment = Alignment.Center
                 ) {
-                    WeConnectLogoMark(size = 64.dp)
-                    Spacer(Modifier.height(12.dp))
-                    Text("Connection Issue", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(Modifier.height(6.dp))
-                    Text(state.message, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(18.dp))
-                    OutlinedButton(onClick = performSignOut) { Text("Sign Out") }
+                    Surface(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                        color = PureWhite.copy(alpha = 0.94f),
+                        tonalElevation = 2.dp,
+                        shadowElevation = 8.dp
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            WeConnectLogoMark(size = 64.dp)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Connection Issue", style = MaterialTheme.typography.headlineSmall)
+                            Spacer(Modifier.height(6.dp))
+                            Text(state.message, style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(18.dp))
+                            OutlinedButton(onClick = performSignOut) { Text("Sign Out") }
+                        }
+                    }
                 }
             }
         }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -59,6 +60,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -78,9 +81,13 @@ import com.example.data.remote.extractFirestoreMessage
 import com.example.data.repository.AuthProfileRepository
 import com.example.ui.components.WeConnectAvatar
 import com.example.ui.theme.PureWhite
+import com.example.ui.theme.WeConnectTheme
 import com.example.ui.theme.WhatsAppCallRed
-import com.example.ui.theme.WhatsAppEmerald
 import com.example.ui.theme.WhatsAppGreen
+import com.example.ui.theme.WhatsAppInkDark
+import com.example.ui.theme.WhatsAppLightBg
+import com.example.ui.theme.WhatsAppMutedGray
+import com.example.ui.theme.WhatsAppNavIndicatorLight
 import com.example.ui.theme.WhatsAppTeal
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
@@ -202,6 +209,36 @@ fun signOutWithCleanup(
 }
 
 @Composable
+fun AuthPhotoBackdrop(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    WeConnectTheme(darkTheme = false) {
+        Box(modifier = modifier.fillMaxSize()) {
+            Image(
+                painter = painterResource(id = R.drawable.auth_launch_bg),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.0f to PureWhite.copy(alpha = 0.08f),
+                            0.35f to WhatsAppLightBg.copy(alpha = 0.24f),
+                            0.68f to WhatsAppLightBg.copy(alpha = 0.76f),
+                            1.0f to PureWhite.copy(alpha = 0.94f)
+                        )
+                    )
+            )
+            content()
+        }
+    }
+}
+
+@Composable
 fun AuthScreen(
     onAuthSuccess: () -> Unit
 ) {
@@ -221,16 +258,13 @@ fun AuthScreen(
         )
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    AuthPhotoBackdrop {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            contentAlignment = Alignment.Center
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            contentAlignment = Alignment.BottomCenter
         ) {
             Column(
                 modifier = Modifier
@@ -239,139 +273,182 @@ fun AuthScreen(
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.weconnect_logo),
-                    contentDescription = "WeConnect Logo",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(88.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Welcome to WeConnect",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Private encrypted messaging, communities, and calls — clean, fast, and connected.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(22.dp))
-
-                Card(
+                // Brand badge floating cleanly so the photo remains prominent above
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = PureWhite.copy(alpha = 0.92f),
+                        shadowElevation = 4.dp,
+                        border = BorderStroke(1.dp, WhatsAppTeal.copy(alpha = 0.14f))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.weconnect_logo),
+                                contentDescription = "WeConnect Logo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "WeConnect",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = WhatsAppTeal
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(140.dp))
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(28.dp),
+                    color = PureWhite.copy(alpha = 0.94f),
+                    tonalElevation = 2.dp,
+                    shadowElevation = 8.dp,
+                    border = BorderStroke(1.dp, WhatsAppTeal.copy(alpha = 0.14f))
                 ) {
                     Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        AuthFeatureRow(
-                            icon = Icons.Default.Lock,
-                            title = "End-to-End Encrypted Chats",
-                            subtitle = "Per-device P-256 ECDH & AES-256-GCM keys keep direct conversations private."
-                        )
-                        AuthFeatureRow(
-                            icon = Icons.Default.Public,
-                            title = "Social Feed & 24h Status",
-                            subtitle = "Share posts, status updates, reactions, and connect with real people."
-                        )
-                        AuthFeatureRow(
-                            icon = Icons.Default.Groups,
-                            title = "Communities, Channels & Calls",
-                            subtitle = "Create communities, announcement channels, and real-time voice/video calls."
-                        )
-                    }
-                }
-
-                if (errorMessage != null) {
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                        border = BorderStroke(1.dp, WhatsAppCallRed.copy(alpha = 0.4f))
+                        modifier = Modifier.padding(22.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = errorMessage!!,
+                            text = "Welcome to WeConnect",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = WhatsAppTeal,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Private encrypted messaging, communities, and calls — clean, fast, and connected.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.padding(12.dp)
+                            color = WhatsAppMutedGray,
+                            textAlign = TextAlign.Center
                         )
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(18.dp))
 
-                Button(
-                    onClick = {
-                        errorMessage = null
-                        isLoading = true
-                        onGoogleSignInClicked(
-                            context = context,
-                            credentialManager = credentialManager,
-                            onAuthSuccess = {
-                                isLoading = false
-                                onAuthSuccess()
-                            },
-                            onAuthError = { msg ->
-                                isLoading = false
-                                errorMessage = msg
-                            },
-                            scope = scope,
-                            onAuthCancelled = {
-                                isLoading = false
-                                errorMessage = "Sign-in was dismissed. Select your Google account to create or access your WeConnect account."
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp),
+                            color = WhatsAppLightBg,
+                            border = BorderStroke(1.dp, WhatsAppTeal.copy(alpha = 0.08f))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                AuthFeatureRow(
+                                    icon = Icons.Default.Lock,
+                                    title = "End-to-End Encrypted Chats",
+                                    subtitle = "Per-device P-256 ECDH & AES-256-GCM keys keep direct conversations private."
+                                )
+                                AuthFeatureRow(
+                                    icon = Icons.Default.Public,
+                                    title = "Social Feed & 24h Status",
+                                    subtitle = "Share posts, status updates, reactions, and connect with real people."
+                                )
+                                AuthFeatureRow(
+                                    icon = Icons.Default.Groups,
+                                    title = "Communities, Channels & Calls",
+                                    subtitle = "Create communities, announcement channels, and real-time voice/video calls."
+                                )
                             }
-                        )
-                    },
-                    enabled = !isLoading,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = WhatsAppEmerald,
-                        contentColor = PureWhite
-                    ),
-                    shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("google_sign_in_button")
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            color = PureWhite,
-                            strokeWidth = 2.5.dp
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Connecting securely…")
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.VerifiedUser,
-                            contentDescription = null,
-                            tint = PureWhite
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
+                        }
+
+                        if (errorMessage != null) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                border = BorderStroke(1.dp, WhatsAppCallRed.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = errorMessage!!,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        Button(
+                            onClick = {
+                                errorMessage = null
+                                isLoading = true
+                                onGoogleSignInClicked(
+                                    context = context,
+                                    credentialManager = credentialManager,
+                                    onAuthSuccess = {
+                                        isLoading = false
+                                        onAuthSuccess()
+                                    },
+                                    onAuthError = { msg ->
+                                        isLoading = false
+                                        errorMessage = msg
+                                    },
+                                    scope = scope,
+                                    onAuthCancelled = {
+                                        isLoading = false
+                                        errorMessage = "Sign-in was dismissed. Select your Google account to create or access your WeConnect account."
+                                    }
+                                )
+                            },
+                            enabled = !isLoading,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = WhatsAppTeal,
+                                contentColor = PureWhite
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .testTag("google_sign_in_button")
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    color = PureWhite,
+                                    strokeWidth = 2.5.dp
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text("Connecting securely…")
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.VerifiedUser,
+                                    contentDescription = null,
+                                    tint = WhatsAppGreen
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Continue with Google",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "Continue with Google",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
+                            text = "Every user creates an authentic profile secured by Firebase Authentication and Firestore rules.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = WhatsAppMutedGray,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Every user creates an authentic profile secured by Firebase Authentication and Firestore rules.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
             }
         }
     }
@@ -390,27 +467,28 @@ private fun AuthFeatureRow(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(38.dp)
+                .size(36.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer)
+                .background(WhatsAppNavIndicatorLight)
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = WhatsAppTeal,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(19.dp)
             )
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface
+                color = WhatsAppInkDark,
+                fontWeight = FontWeight.SemiBold
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = WhatsAppMutedGray
             )
         }
     }
@@ -486,16 +564,14 @@ fun OnboardingProfileScreen(
         AuthProfileRepository.isValidUsernameFormat(cleanUsername) &&
         usernameAvailable != false
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    AuthPhotoBackdrop {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
+                .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(24.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Column(
@@ -504,200 +580,229 @@ fun OnboardingProfileScreen(
                     .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = "Profile info",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = WhatsAppTeal,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Please provide your name, a unique @username, and an optional profile photo.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                WeConnectAvatar(
-                    displayName = displayName.ifBlank { "W" },
-                    avatarBase64 = avatarBase64,
-                    size = 86.dp
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                OutlinedButton(
-                    onClick = {
-                        photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
-                    modifier = Modifier.testTag("onboarding_pick_photo")
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = PureWhite.copy(alpha = 0.92f),
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, WhatsAppTeal.copy(alpha = 0.14f))
                 ) {
-                    Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = WhatsAppTeal)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (avatarBase64 == null) "Add Profile Photo" else "Change Photo")
-                }
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                OutlinedTextField(
-                    value = displayName,
-                    onValueChange = { displayName = it.take(50) },
-                    label = { Text("Display Name") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("onboarding_display_name")
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = AuthProfileRepository.normalizeUsername(it).take(30) },
-                    label = { Text("Unique Username") },
-                    leadingIcon = { Icon(Icons.Default.AlternateEmail, contentDescription = null) },
-                    trailingIcon = {
-                        when {
-                            checkingUsername -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = WhatsAppTeal)
-                            usernameAvailable == true -> Icon(Icons.Default.CheckCircle, contentDescription = "Available", tint = WhatsAppGreen)
-                            usernameAvailable == false -> Icon(Icons.Default.ErrorOutline, contentDescription = "Taken", tint = WhatsAppCallRed)
-                        }
-                    },
-                    isError = usernameAvailable == false,
-                    supportingText = {
-                        val msg = when {
-                            cleanUsername.length < 3 -> "3–30 lowercase letters, numbers, or underscores"
-                            checkingUsername -> "Checking @$cleanUsername…"
-                            usernameAvailable == true -> "@$cleanUsername is available"
-                            usernameAvailable == false -> "@$cleanUsername is already taken — choose another"
-                            usernameCheckError != null -> "Check notice: $usernameCheckError"
-                            else -> "Tap Create Account to claim @$cleanUsername"
-                        }
-                        Text(msg)
-                    },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("onboarding_username")
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = bio,
-                    onValueChange = { bio = it.take(200) },
-                    label = { Text("About / Bio (optional)") },
-                    minLines = 2,
-                    maxLines = 3,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("onboarding_bio")
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = { phone = it.take(30) },
-                    label = { Text("Phone Number (optional, private)") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("onboarding_phone")
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Account:",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    FilterChip(
-                        selected = visibility == "PUBLIC",
-                        onClick = { visibility = "PUBLIC" },
-                        label = { Text("Public") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = WhatsAppTeal,
-                            selectedLabelColor = PureWhite
-                        )
-                    )
-                    FilterChip(
-                        selected = visibility == "PRIVATE",
-                        onClick = { visibility = "PRIVATE" },
-                        label = { Text("Private") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = WhatsAppTeal,
-                            selectedLabelColor = PureWhite
-                        )
-                    )
-                }
-
-                if (errorMsg != null) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                        border = BorderStroke(1.dp, WhatsAppCallRed.copy(alpha = 0.4f)),
-                        modifier = Modifier.fillMaxWidth()
+                    Column(
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = errorMsg!!,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.padding(12.dp)
+                            text = "Set up your profile",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = WhatsAppTeal,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Provide your name, unique @username, and optional profile photo.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = WhatsAppMutedGray,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(22.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                Button(
-                    onClick = {
-                        errorMsg = null
-                        isSubmitting = true
-                        scope.launch {
-                            val res = repo.createInitialProfile(
-                                displayName = displayName,
-                                rawUsername = cleanUsername,
-                                bio = bio,
-                                avatarBase64 = avatarBase64,
-                                accountVisibility = visibility,
-                                phone = phone.ifBlank { null }
-                            )
-                            isSubmitting = false
-                            res.onSuccess { onProfileCreated() }
-                                .onFailure { err ->
-                                    errorMsg = extractFirestoreMessage(err, "Failed to create profile. Please try again.")
-                                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(28.dp),
+                    color = PureWhite.copy(alpha = 0.95f),
+                    tonalElevation = 2.dp,
+                    shadowElevation = 8.dp,
+                    border = BorderStroke(1.dp, WhatsAppTeal.copy(alpha = 0.14f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        WeConnectAvatar(
+                            displayName = displayName.ifBlank { "W" },
+                            avatarBase64 = avatarBase64,
+                            size = 86.dp
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = {
+                                photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            modifier = Modifier.testTag("onboarding_pick_photo")
+                        ) {
+                            Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = WhatsAppTeal)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (avatarBase64 == null) "Add Profile Photo" else "Change Photo")
                         }
-                    },
-                    enabled = isFormReady,
-                    colors = ButtonDefaults.buttonColors(containerColor = WhatsAppEmerald, contentColor = PureWhite),
-                    shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("onboarding_create_account_button")
-                ) {
-                    if (isSubmitting) {
-                        CircularProgressIndicator(Modifier.size(20.dp), color = PureWhite, strokeWidth = 2.dp)
-                        Spacer(Modifier.width(10.dp))
-                        Text("Creating account…")
-                    } else {
-                        Text("Create WeConnect Account", fontWeight = FontWeight.SemiBold)
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(10.dp))
-                OutlinedButton(
-                    onClick = onSignOut,
-                    shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Switch Google Account")
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        OutlinedTextField(
+                            value = displayName,
+                            onValueChange = { displayName = it.take(50) },
+                            label = { Text("Display Name") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("onboarding_display_name")
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = { username = AuthProfileRepository.normalizeUsername(it).take(30) },
+                            label = { Text("Unique Username") },
+                            leadingIcon = { Icon(Icons.Default.AlternateEmail, contentDescription = null) },
+                            trailingIcon = {
+                                when {
+                                    checkingUsername -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = WhatsAppTeal)
+                                    usernameAvailable == true -> Icon(Icons.Default.CheckCircle, contentDescription = "Available", tint = WhatsAppGreen)
+                                    usernameAvailable == false -> Icon(Icons.Default.ErrorOutline, contentDescription = "Taken", tint = WhatsAppCallRed)
+                                }
+                            },
+                            isError = usernameAvailable == false,
+                            supportingText = {
+                                val msg = when {
+                                    cleanUsername.length < 3 -> "3–30 lowercase letters, numbers, or underscores"
+                                    checkingUsername -> "Checking @$cleanUsername…"
+                                    usernameAvailable == true -> "@$cleanUsername is available"
+                                    usernameAvailable == false -> "@$cleanUsername is already taken — choose another"
+                                    usernameCheckError != null -> "Check notice: $usernameCheckError"
+                                    else -> "Tap Create Account to claim @$cleanUsername"
+                                }
+                                Text(msg)
+                            },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("onboarding_username")
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        OutlinedTextField(
+                            value = bio,
+                            onValueChange = { bio = it.take(200) },
+                            label = { Text("About / Bio (optional)") },
+                            minLines = 2,
+                            maxLines = 3,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("onboarding_bio")
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        OutlinedTextField(
+                            value = phone,
+                            onValueChange = { phone = it.take(30) },
+                            label = { Text("Phone Number (optional, private)") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("onboarding_phone")
+                        )
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Account:",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                            FilterChip(
+                                selected = visibility == "PUBLIC",
+                                onClick = { visibility = "PUBLIC" },
+                                label = { Text("Public") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = WhatsAppTeal,
+                                    selectedLabelColor = PureWhite
+                                )
+                            )
+                            FilterChip(
+                                selected = visibility == "PRIVATE",
+                                onClick = { visibility = "PRIVATE" },
+                                label = { Text("Private") },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = WhatsAppTeal,
+                                    selectedLabelColor = PureWhite
+                                )
+                            )
+                        }
+
+                        if (errorMsg != null) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                border = BorderStroke(1.dp, WhatsAppCallRed.copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = errorMsg!!,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(22.dp))
+
+                        Button(
+                            onClick = {
+                                errorMsg = null
+                                isSubmitting = true
+                                scope.launch {
+                                    val res = repo.createInitialProfile(
+                                        displayName = displayName,
+                                        rawUsername = cleanUsername,
+                                        bio = bio,
+                                        avatarBase64 = avatarBase64,
+                                        accountVisibility = visibility,
+                                        phone = phone.ifBlank { null }
+                                    )
+                                    isSubmitting = false
+                                    res.onSuccess { onProfileCreated() }
+                                        .onFailure { err ->
+                                            errorMsg = extractFirestoreMessage(err, "Failed to create profile. Please try again.")
+                                        }
+                                }
+                            },
+                            enabled = isFormReady,
+                            colors = ButtonDefaults.buttonColors(containerColor = WhatsAppTeal, contentColor = PureWhite),
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .testTag("onboarding_create_account_button")
+                        ) {
+                            if (isSubmitting) {
+                                CircularProgressIndicator(Modifier.size(20.dp), color = PureWhite, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(10.dp))
+                                Text("Creating account…")
+                            } else {
+                                Text("Create WeConnect Account", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = onSignOut,
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Switch Google Account")
+                        }
+                    }
                 }
             }
         }

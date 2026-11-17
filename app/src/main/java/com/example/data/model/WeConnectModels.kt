@@ -194,7 +194,7 @@ data class StoryItem(
     val mediaType: String = "TEXT",
     val caption: String = "",
     val mediaBase64: String? = null,
-    val bgColorHex: String = "#075E45",
+    val bgColorHex: String = "#075E54",
     val visibility: String = "PUBLIC",
     val viewsCount: Long = 0L,
     val expiresAt: Timestamp? = null,

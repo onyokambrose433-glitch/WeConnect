@@ -3,19 +3,20 @@ package com.example.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // WhatsApp-Inspired Palette (Light & Dark)
-val WhatsAppTeal = Color(0xFF008069)
+val WhatsAppTeal = Color(0xFF075E54)
 val WhatsAppGreen = Color(0xFF25D366)
-val WhatsAppEmerald = Color(0xFF1DAB61)
+val WhatsAppEmerald = Color(0xFF25D366)
+val WhatsAppTealLight = Color(0xFF128C7E)
 val WhatsAppDarkTeal = Color(0xFF005C4B)
 val PureWhite = Color(0xFFFFFFFF)
 
 // WhatsApp Light Surfaces & Text
-val WhatsAppLightBg = Color(0xFFFFFFFF)
+val WhatsAppLightBg = Color(0xFFF7F8FA)
 val WhatsAppLightSurfaceVariant = Color(0xFFF0F2F5)
 val WhatsAppLightBorder = Color(0xFFE9EDEF)
 val WhatsAppNavIndicatorLight = Color(0xFFD8FDD2)
-val WhatsAppOutgoingBubbleLight = Color(0xFFD9FDD3)
-val WhatsAppChatWallpaperLight = Color(0xFFEFEAE2)
+val WhatsAppOutgoingBubbleLight = Color(0xFFDCF8C6)
+val WhatsAppChatWallpaperLight = Color(0xFFECE5DD)
 val WhatsAppInkDark = Color(0xFF111B21)
 val WhatsAppMutedGray = Color(0xFF54656F)
 

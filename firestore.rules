@@ -164,7 +164,7 @@ service cloud.firestore {
              data.mediaType in ['TEXT', 'IMAGE'] &&
              data.caption is string && data.caption.size() <= 400 &&
              (!('mediaBase64' in data) || (data.mediaBase64 is string && data.mediaBase64.size() <= 350000)) &&
-             data.bgColorHex in ['#008069', '#25D366', '#111B21', '#005C4B', '#075E45', '#16A34A', '#0B1F14', '#D4AF37'] &&
+             data.bgColorHex in ['#075E54', '#008069', '#25D366', '#111B21', '#005C4B', '#075E45', '#16A34A', '#0B1F14', '#D4AF37'] &&
              data.visibility in ['PUBLIC', 'FOLLOWERS'] &&
              data.viewsCount is int && data.viewsCount >= 0 &&
              data.expiresAt is timestamp &&

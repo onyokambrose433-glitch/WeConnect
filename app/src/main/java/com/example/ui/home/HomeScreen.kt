@@ -777,7 +777,7 @@ private fun CreateStoryDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var caption by remember { mutableStateOf("") }
-    var bgHex by remember { mutableStateOf("#008069") }
+    var bgHex by remember { mutableStateOf("#075E54") }
     var mediaBase64 by remember { mutableStateOf<String?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -810,7 +810,7 @@ private fun CreateStoryDialog(
                 Text("Background Color", style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     listOf(
-                        "#008069" to WhatsAppTeal,
+                        "#075E54" to WhatsAppTeal,
                         "#25D366" to WhatsAppGreen,
                         "#005C4B" to WhatsAppDarkTeal,
                         "#111B21" to WhatsAppInkDark
