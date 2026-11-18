@@ -28,6 +28,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Call
@@ -40,6 +42,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import com.example.ui.theme.WhatsAppCallRed
+import com.example.ui.theme.WhatsAppEmerald
 import com.example.ui.theme.WhatsAppGreen
 import com.example.ui.theme.WhatsAppOfflineGray
 import androidx.compose.material3.IconButton
@@ -109,6 +113,7 @@ import com.example.ui.chats.ChatsListScreen
 import com.example.ui.communities.CommunitiesScreen
 import com.example.ui.communities.CommunityDetailScreen
 import com.example.ui.components.GeminiAssistantDialog
+import com.example.ui.components.NotificationsCenterSheet
 import com.example.ui.components.WeConnectLogoMark
 import com.example.ui.home.HomeScreen
 import com.example.ui.main.AiViewModel
@@ -210,7 +215,11 @@ private fun AuthenticatedRoot(
                     socialRepo = SocialRepository(db),
                     communityCallRepo = CommunityCallRepository(db),
                     crypto = crypto,
-                    networkMonitor = netMonitor
+                    networkMonitor = netMonitor,
+                    notifPrefs = app.getSharedPreferences(
+                        "weconnect_notif_prefs_$currentUserId",
+                        android.content.Context.MODE_PRIVATE
+                    )
                 )
             }
         }
@@ -242,7 +251,12 @@ private fun AuthenticatedRoot(
         val latest = notifications.firstOrNull { !it.read }
         if (latest != null && latest.id != lastNotifId) {
             lastNotifId = latest.id
-            WeConnectNotifier.showNotification(context, latest.actorName.ifBlank { "WeConnect" }, latest.summary)
+            WeConnectNotifier.showNotification(
+                context = context,
+                title = latest.actorName.ifBlank { "WeConnect" },
+                message = latest.summary,
+                notificationId = latest.id.hashCode()
+            )
         }
     }
 
@@ -377,8 +391,12 @@ private fun WeConnectShell(
     var inspectUserUid by rememberSaveable { mutableStateOf<String?>(null) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var showGeminiDialog by remember { mutableStateOf(false) }
+    var showNotificationsSheet by remember { mutableStateOf(false) }
 
     val unreadChatsCount by viewModel.unreadChatsCount.collectAsStateWithLifecycle()
+    val unreadNotifCount by viewModel.unreadNotificationsCount.collectAsStateWithLifecycle()
+    val notificationsList by viewModel.notifications.collectAsStateWithLifecycle()
+    val recentNewcomers by viewModel.recentNewcomers.collectAsStateWithLifecycle()
     val conversationsState by viewModel.conversationsState.collectAsStateWithLifecycle()
 
     LaunchedEffect(openChatId) {
@@ -422,6 +440,37 @@ private fun WeConnectShell(
 
     LaunchedEffect(myProfile.uid) {
         viewModel.syncCurrentDevice()
+        viewModel.authRepo.ensureWelcomeNotification(myProfile.displayName)
+    }
+
+    var knownNotifIds by remember { mutableStateOf<Set<String>?>(null) }
+    LaunchedEffect(notificationsList) {
+        val currentIds = notificationsList.map { it.id }.toSet()
+        val prev = knownNotifIds
+        if (prev == null) {
+            knownNotifIds = currentIds
+        } else {
+            val newUnread = notificationsList.firstOrNull { !it.read && it.id !in prev }
+            knownNotifIds = currentIds
+            if (newUnread != null) {
+                snackbarHostState.showSnackbar("🔔 ${newUnread.summary}")
+            }
+        }
+    }
+
+    var knownNewcomerIds by remember { mutableStateOf<Set<String>?>(null) }
+    LaunchedEffect(recentNewcomers) {
+        val currentIds = recentNewcomers.map { it.uid }.toSet()
+        val prev = knownNewcomerIds
+        if (prev == null) {
+            knownNewcomerIds = currentIds
+        } else {
+            val joined = recentNewcomers.firstOrNull { it.uid !in prev }
+            knownNewcomerIds = currentIds
+            if (joined != null) {
+                snackbarHostState.showSnackbar("🎉 ${joined.displayName} (@${joined.username}) joined WeConnect! Tap 🔔 to welcome them.")
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -501,16 +550,39 @@ private fun WeConnectShell(
                         },
                         actions = {
                             IconButton(
-                                onClick = { showGeminiDialog = true },
-                                modifier = Modifier.testTag("open_gemini_button")
+                                onClick = { showNotificationsSheet = true },
+                                modifier = Modifier.testTag("top_notifications_button")
                             ) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = "WeConnect AI (Gemini)", tint = WhatsAppTeal)
+                                BadgedBox(
+                                    badge = {
+                                        if (unreadNotifCount > 0) {
+                                            Badge(
+                                                containerColor = WhatsAppCallRed,
+                                                contentColor = PureWhite
+                                            ) {
+                                                Text(if (unreadNotifCount > 99) "99+" else "$unreadNotifCount")
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = if (unreadNotifCount > 0) Icons.Default.NotificationsActive else Icons.Default.Notifications,
+                                        contentDescription = "Notifications",
+                                        tint = if (unreadNotifCount > 0) WhatsAppEmerald else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                             IconButton(
                                 onClick = { showSearchDialog = true },
                                 modifier = Modifier.testTag("global_search_button")
                             ) {
                                 Icon(Icons.Default.Search, contentDescription = "Global Search", tint = MaterialTheme.colorScheme.onSurface)
+                            }
+                            IconButton(
+                                onClick = { showGeminiDialog = true },
+                                modifier = Modifier.testTag("open_gemini_button")
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = "WeConnect AI (Gemini)", tint = WhatsAppTeal)
                             }
                         }
                     )
@@ -646,7 +718,8 @@ private fun WeConnectShell(
                                 viewModel = viewModel,
                                 myProfile = myProfile,
                                 onSignOut = onSignOut,
-                                onMessageUser = openDirectChatWithPeer
+                                onMessageUser = openDirectChatWithPeer,
+                                onOpenNotifications = { showNotificationsSheet = true }
                             )
                         }
                     }
@@ -683,6 +756,26 @@ private fun WeConnectShell(
             onDismiss = { inspectUserUid = null },
             onMessageUser = openDirectChatWithPeer,
             onCallUser = startCallWithPeer
+        )
+    }
+
+    if (showNotificationsSheet) {
+        NotificationsCenterSheet(
+            viewModel = viewModel,
+            myProfile = myProfile,
+            onDismiss = { showNotificationsSheet = false },
+            onOpenUserProfile = { uid -> inspectUserUid = uid },
+            onOpenChat = { chatId ->
+                activeTab = MainTab.CHATS
+                openChatId = chatId
+            },
+            onOpenCommunity = { commId ->
+                activeTab = MainTab.COMMUNITIES
+                openCommunityId = commId
+            },
+            onOpenHome = { activeTab = MainTab.HOME },
+            onOpenCalls = { activeTab = MainTab.CALLS },
+            onMessageUser = openDirectChatWithPeer
         )
     }
 

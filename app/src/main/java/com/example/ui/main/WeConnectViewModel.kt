@@ -1,5 +1,6 @@
 package com.example.ui.main
 
+import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.crypto.DeviceIdentity
@@ -61,7 +62,8 @@ class WeConnectViewModel(
     val socialRepo: SocialRepository,
     val communityCallRepo: CommunityCallRepository,
     val crypto: WeConnectCrypto,
-    val networkMonitor: NetworkMonitor
+    val networkMonitor: NetworkMonitor,
+    private val notifPrefs: SharedPreferences? = null
 ) : ViewModel() {
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
@@ -116,6 +118,62 @@ class WeConnectViewModel(
     val notifications: StateFlow<List<AppNotification>> = authRepo.observeNotifications(currentUserId)
         .catch { error -> if (error is CancellationException) throw error }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    private val _welcomedNewcomerIds = MutableStateFlow(
+        notifPrefs?.getStringSet("welcomed_newcomers", emptySet())?.toSet() ?: emptySet()
+    )
+    val welcomedNewcomerIds: StateFlow<Set<String>> = _welcomedNewcomerIds.asStateFlow()
+
+    val recentNewcomers: StateFlow<List<PublicProfile>> = combine(
+        allProfilesState,
+        blockedUsers,
+        _nowMsTicker
+    ) { profilesUi, blocked, nowMs ->
+        val profiles = (profilesUi as? UiState.Success)?.data ?: emptyList()
+        val blockedSet = blocked.map { it.blockedUid }.toSet()
+        val cutoffSec = (nowMs / 1000L) - 14L * 24L * 3600L
+        profiles.filter { p ->
+            p.uid != currentUserId &&
+                p.uid !in blockedSet &&
+                ((p.createdAt?.seconds ?: 0L) >= cutoffSec)
+        }.sortedByDescending { it.createdAt?.seconds ?: 0L }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    val unwelcomedNewcomerIds: StateFlow<Set<String>> = combine(
+        recentNewcomers,
+        _welcomedNewcomerIds,
+        followingIds
+    ) { newcomers, welcomed, following ->
+        newcomers.map { it.uid }
+            .filter { it !in welcomed && it !in following }
+            .toSet()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptySet())
+
+    val unreadNotificationsCount: StateFlow<Int> = combine(
+        notifications,
+        unwelcomedNewcomerIds
+    ) { notifs, newcomerIds ->
+        notifs.count { !it.read } + newcomerIds.size
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), 0)
+
+    fun markNewcomerWelcomed(uid: String) {
+        if (uid.isBlank()) return
+        _welcomedNewcomerIds.update { current ->
+            val updated = current + uid
+            notifPrefs?.edit()?.putStringSet("welcomed_newcomers", updated)?.apply()
+            updated
+        }
+    }
+
+    fun markAllNewcomersWelcomed() {
+        val ids = recentNewcomers.value.map { it.uid }.toSet()
+        if (ids.isEmpty()) return
+        _welcomedNewcomerIds.update { current ->
+            val updated = current + ids
+            notifPrefs?.edit()?.putStringSet("welcomed_newcomers", updated)?.apply()
+            updated
+        }
+    }
 
     val conversationsState: StateFlow<UiState<List<Conversation>>> = messagingRepo.observeConversations(currentUserId)
         .map<List<Conversation>, UiState<List<Conversation>>> { UiState.Success(it) }

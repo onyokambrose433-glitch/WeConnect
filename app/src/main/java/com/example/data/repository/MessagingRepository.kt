@@ -223,6 +223,25 @@ class MessagingRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
+            val groupSummary = "${myProfile.displayName.trim().ifBlank { "Someone" }} added you to group \"$cleanTitle\"".take(200)
+            val safeCreator = myProfile.displayName.trim().ifBlank { "WeConnect User" }.take(60)
+            allMembers.filter { it.uid != uid }.take(10).forEach { member ->
+                try {
+                    db.collection("users").document(member.uid).collection("notifications").document().set(
+                        mapOf(
+                            "recipientUid" to member.uid,
+                            "actorUid" to uid,
+                            "actorName" to safeCreator,
+                            "type" to "COMMUNITY",
+                            "targetId" to docRef.id,
+                            "summary" to groupSummary,
+                            "read" to false,
+                            "createdAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } catch (_: Exception) {
+                }
+            }
             Result.success(docRef.id)
         } catch (e: CancellationException) {
             throw e
@@ -323,6 +342,48 @@ class MessagingRepository(
                 )
             )
             batch.commit().await()
+
+            val safeSender = senderProfile.displayName.trim().ifBlank { "WeConnect User" }.take(60)
+            val notifType = if (conversation.type == "GROUP") "COMMUNITY" else "MESSAGE_REQUEST"
+            val notifSummary = when {
+                conversation.type == "GROUP" -> {
+                    val title = conversation.title.ifBlank { "Group Chat" }
+                    val snippet = when {
+                        messageType == "IMAGE" -> "shared a photo"
+                        messageType == "VOICE" -> "sent a voice note"
+                        messageType == "FILE" -> "shared a file"
+                        isEncrypted -> "sent a message"
+                        else -> cleanText.take(70)
+                    }
+                    "$safeSender in $title: $snippet"
+                }
+                messageType == "IMAGE" -> "$safeSender sent you a photo."
+                messageType == "VOICE" -> "$safeSender sent you a voice note."
+                messageType == "FILE" -> "$safeSender sent you a file: ${fileName ?: "Document"}"
+                isEncrypted -> "$safeSender sent you a message."
+                else -> "$safeSender: ${cleanText.take(90)}"
+            }.take(200)
+
+            conversation.memberUids.filter { it != uid && it.isNotBlank() && !it.endsWith("_test") }
+                .take(10)
+                .forEach { recipientUid ->
+                    try {
+                        db.collection("users").document(recipientUid).collection("notifications").document().set(
+                            mapOf(
+                                "recipientUid" to recipientUid,
+                                "actorUid" to uid,
+                                "actorName" to safeSender,
+                                "type" to notifType,
+                                "targetId" to conversation.id,
+                                "summary" to notifSummary,
+                                "read" to false,
+                                "createdAt" to FieldValue.serverTimestamp()
+                            )
+                        ).await()
+                    } catch (_: Exception) {
+                    }
+                }
+
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e

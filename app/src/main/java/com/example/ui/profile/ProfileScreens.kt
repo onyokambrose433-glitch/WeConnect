@@ -94,7 +94,8 @@ fun ProfileScreen(
     viewModel: WeConnectViewModel,
     myProfile: PublicProfile,
     onSignOut: () -> Unit,
-    onMessageUser: (PublicProfile) -> Unit = {}
+    onMessageUser: (PublicProfile) -> Unit = {},
+    onOpenNotifications: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -102,7 +103,7 @@ fun ProfileScreen(
     val privateUser by viewModel.privateUserState.collectAsStateWithLifecycle()
     val devices by viewModel.devices.collectAsStateWithLifecycle()
     val blockedUsers by viewModel.blockedUsers.collectAsStateWithLifecycle()
-    val notifications by viewModel.notifications.collectAsStateWithLifecycle()
+    val unreadNotifCount by viewModel.unreadNotificationsCount.collectAsStateWithLifecycle()
     val deviceIdentity by viewModel.deviceIdentity.collectAsStateWithLifecycle()
     val isOnlineNetwork by viewModel.isOnlineNetwork.collectAsStateWithLifecycle()
     val allProfilesState by viewModel.allProfilesState.collectAsStateWithLifecycle()
@@ -116,7 +117,6 @@ fun ProfileScreen(
     var showEditProfile by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
     var showDevicesDialog by remember { mutableStateOf(false) }
-    var showNotificationsDialog by remember { mutableStateOf(false) }
     var showSignOutConfirm by remember { mutableStateOf(false) }
     var connectionsInitialTab by remember { mutableStateOf<Int?>(null) }
 
@@ -197,9 +197,9 @@ fun ProfileScreen(
                     Column(modifier = Modifier.padding(vertical = 4.dp)) {
                         ProfileActionRow(
                             icon = Icons.Default.Notifications,
-                            title = "Notifications (${notifications.count { !it.read }} unread)",
-                            subtitle = "Follows, reactions, comments, and call alerts",
-                            onClick = { showNotificationsDialog = true }
+                            title = "Notifications ($unreadNotifCount unread)",
+                            subtitle = "Follows, messages, reactions, calls & newcomers",
+                            onClick = onOpenNotifications
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         ProfileActionRow(
@@ -359,39 +359,6 @@ fun ProfileScreen(
             },
             confirmButton = {},
             dismissButton = { OutlinedButton(onClick = { showDevicesDialog = false }) { Text("Close") } }
-        )
-    }
-
-    if (showNotificationsDialog) {
-        AlertDialog(
-            onDismissRequest = { showNotificationsDialog = false },
-            title = { Text("Notifications") },
-            text = {
-                LazyColumn(modifier = Modifier.height(260.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (notifications.isEmpty()) {
-                        item { Text("You are all caught up.", style = MaterialTheme.typography.bodyMedium) }
-                    } else {
-                        items(notifications, key = { it.id }) { notif ->
-                            Surface(
-                                color = if (notif.read) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer,
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        scope.launch { viewModel.authRepo.markNotificationRead(notif.id) }
-                                    }
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text(notif.summary, style = MaterialTheme.typography.bodyMedium)
-                                    Text(formatRelativeTime(notif.createdAt), style = MaterialTheme.typography.labelSmall)
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = { OutlinedButton(onClick = { showNotificationsDialog = false }) { Text("Close") } }
         )
     }
 

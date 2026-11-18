@@ -349,6 +349,23 @@ class AuthProfileRepository(
                 )
             }
 
+            if (!existingPublic.exists()) {
+                val welcomeRef = privateRef.collection("notifications").document("welcome_${uid}")
+                batch.set(
+                    welcomeRef,
+                    mapOf(
+                        "recipientUid" to uid,
+                        "actorUid" to uid,
+                        "actorName" to "WeConnect",
+                        "type" to "COMMUNITY",
+                        "targetId" to uid,
+                        "summary" to "Welcome to WeConnect, $cleanDisplay! Follow people you know, share updates, and enjoy private chats & calls.".take(200),
+                        "read" to false,
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+
             batch.commit().await()
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -596,6 +613,30 @@ class AuthProfileRepository(
         }
     }
 
+    suspend fun ensureWelcomeNotification(displayName: String) {
+        val uid = auth.currentUser?.uid ?: return
+        try {
+            val welcomeRef = db.collection("users").document(uid)
+                .collection("notifications").document("welcome_${uid}")
+            if (!welcomeRef.get().await().exists()) {
+                val safeName = displayName.trim().take(50).ifBlank { "Friend" }
+                welcomeRef.set(
+                    mapOf(
+                        "recipientUid" to uid,
+                        "actorUid" to uid,
+                        "actorName" to "WeConnect",
+                        "type" to "COMMUNITY",
+                        "targetId" to uid,
+                        "summary" to "Welcome to WeConnect, $safeName! Follow people you know, share updates, and enjoy private chats & calls.".take(200),
+                        "read" to false,
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     suspend fun markNotificationRead(notifId: String): Result<Unit> {
         var path = "users"
         return try {
@@ -608,6 +649,67 @@ class AuthProfileRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun markAllNotificationsRead(notifIds: List<String>): Result<Unit> {
+        var path = "users"
+        return try {
+            val uid = requireUserId()
+            val cleanIds = notifIds.filter { it.isNotBlank() }.distinct().take(400)
+            if (cleanIds.isEmpty()) return Result.success(Unit)
+            val col = db.collection("users").document(uid).collection("notifications")
+            path = col.path
+            val batch = db.batch()
+            cleanIds.forEach { id ->
+                batch.update(col.document(id), mapOf("read" to true))
+            }
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteNotification(notifId: String): Result<Unit> {
+        var path = "users"
+        return try {
+            val uid = requireUserId()
+            require(notifId.isNotBlank()) { "Notification ID cannot be blank." }
+            val ref = db.collection("users").document(uid).collection("notifications").document(notifId)
+            path = ref.path
+            ref.delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun clearAllNotifications(notifIds: List<String>): Result<Unit> {
+        var path = "users"
+        return try {
+            val uid = requireUserId()
+            val cleanIds = notifIds.filter { it.isNotBlank() }.distinct().take(400)
+            if (cleanIds.isEmpty()) return Result.success(Unit)
+            val col = db.collection("users").document(uid).collection("notifications")
+            path = col.path
+            val batch = db.batch()
+            cleanIds.forEach { id ->
+                batch.delete(col.document(id))
+            }
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
             Result.failure(e)
         }
     }
