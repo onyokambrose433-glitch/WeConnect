@@ -70,6 +70,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.media.MediaUtils
 import com.example.data.model.PublicProfile
 import com.example.data.model.UiState
+import com.example.data.model.isEffectivelyOnline
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import com.example.ui.components.ReportDialog
@@ -99,6 +100,7 @@ fun ProfileScreen(
     val blockedUsers by viewModel.blockedUsers.collectAsStateWithLifecycle()
     val notifications by viewModel.notifications.collectAsStateWithLifecycle()
     val deviceIdentity by viewModel.deviceIdentity.collectAsStateWithLifecycle()
+    val isOnlineNetwork by viewModel.isOnlineNetwork.collectAsStateWithLifecycle()
     val myPosts by remember(myProfile.uid) {
         viewModel.socialRepo.observeUserPosts(myProfile.uid)
     }.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -135,7 +137,7 @@ fun ProfileScreen(
                             avatarBase64 = myProfile.avatarBase64,
                             size = 82.dp,
                             showOnlineDot = true,
-                            isOnline = myProfile.online
+                            isOnline = isOnlineNetwork && myProfile.online
                         )
                         Spacer(Modifier.height(10.dp))
                         Text(myProfile.displayName, style = MaterialTheme.typography.headlineSmall)
@@ -564,6 +566,7 @@ fun UserPublicProfileDialog(
     val scope = rememberCoroutineScope()
     val allProfilesState by viewModel.allProfilesState.collectAsStateWithLifecycle()
     val followingIds by viewModel.followingIds.collectAsStateWithLifecycle()
+    val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
     val target = remember(allProfilesState, targetUid) {
         ((allProfilesState as? UiState.Success)?.data ?: emptyList()).firstOrNull { it.uid == targetUid }
     }
@@ -580,11 +583,18 @@ fun UserPublicProfileDialog(
     }
 
     val isFollowing = target.uid in followingIds
+    val targetOnline = target.isEffectivelyOnline(nowMs)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                WeConnectAvatar(target.displayName, target.avatarBase64, size = 52.dp, showOnlineDot = target.onlineStatusVisible, isOnline = target.online)
+                WeConnectAvatar(
+                    displayName = target.displayName,
+                    avatarBase64 = target.avatarBase64,
+                    size = 52.dp,
+                    showOnlineDot = target.onlineStatusVisible,
+                    isOnline = targetOnline
+                )
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(target.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -596,13 +606,13 @@ fun UserPublicProfileDialog(
                                 modifier = Modifier
                                     .size(7.dp)
                                     .clip(CircleShape)
-                                    .background(if (target.online) WhatsAppGreen else WhatsAppOfflineGray)
+                                    .background(if (targetOnline) WhatsAppGreen else WhatsAppOfflineGray)
                             )
                             Spacer(Modifier.width(5.dp))
                             Text(
-                                text = if (target.online) "Online" else "Last seen ${formatLastSeenTime(target.lastSeenAt)}",
+                                text = if (targetOnline) "Online" else "Last seen ${formatLastSeenTime(target.lastSeenAt)}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (target.online) WhatsAppEmerald else WhatsAppOfflineGray
+                                color = if (targetOnline) WhatsAppEmerald else WhatsAppOfflineGray
                             )
                         }
                     }
@@ -707,6 +717,7 @@ fun GlobalSearchDialog(
     val profiles = (viewModel.allProfilesState.collectAsStateWithLifecycle().value as? UiState.Success)?.data ?: emptyList()
     val communities = (viewModel.communitiesState.collectAsStateWithLifecycle().value as? UiState.Success)?.data ?: emptyList()
     val posts = (viewModel.publicPostsState.collectAsStateWithLifecycle().value as? UiState.Success)?.data ?: emptyList()
+    val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
 
     val matchedUsers = remember(query, profiles) {
         profiles.filter {
@@ -748,7 +759,13 @@ fun GlobalSearchDialog(
                                     .padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                WeConnectAvatar(user.displayName, user.avatarBase64, size = 34.dp)
+                                WeConnectAvatar(
+                                    displayName = user.displayName,
+                                    avatarBase64 = user.avatarBase64,
+                                    size = 34.dp,
+                                    showOnlineDot = user.onlineStatusVisible,
+                                    isOnline = user.isEffectivelyOnline(nowMs)
+                                )
                                 Spacer(Modifier.width(8.dp))
                                 Column {
                                     Text(user.displayName, style = MaterialTheme.typography.titleSmall)

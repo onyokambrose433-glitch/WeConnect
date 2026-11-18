@@ -28,7 +28,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -65,6 +67,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.Conversation
 import com.example.data.model.PublicProfile
 import com.example.data.model.UiState
+import com.example.data.model.isEffectivelyOnline
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.WeConnectAvatar
 import com.example.ui.components.formatRelativeTime
@@ -91,6 +94,9 @@ fun ChatsListScreen(
     val allProfilesState by viewModel.allProfilesState.collectAsStateWithLifecycle()
     val blockedUsers by viewModel.blockedUsers.collectAsStateWithLifecycle()
     val readTimestamps by viewModel.readChatTimestamps.collectAsStateWithLifecycle()
+    val isOnlineNetwork by viewModel.isOnlineNetwork.collectAsStateWithLifecycle()
+    val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
+    val pendingMessages by viewModel.pendingMessages.collectAsStateWithLifecycle()
 
     val blockedSet = remember(blockedUsers) { blockedUsers.map { it.blockedUid }.toSet() }
     val profilesMap = remember(allProfilesState) {
@@ -125,6 +131,32 @@ fun ChatsListScreen(
                     .widthIn(max = 680.dp)
                     .fillMaxSize()
             ) {
+                if (!isOnlineNetwork) {
+                    Surface(
+                        color = WhatsAppOfflineGray.copy(alpha = 0.16f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.WifiOff,
+                                contentDescription = "Offline",
+                                tint = WhatsAppOfflineGray,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Waiting for network · Messages won't send until you're online",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
@@ -253,8 +285,10 @@ fun ChatsListScreen(
                                 items(list, key = { it.id }) { conv ->
                                     val peerUid = conv.memberUids.firstOrNull { it != myProfile.uid }
                                     val peerProfile = peerUid?.let { profilesMap[it] }
+                                    val peerIsOnline = peerProfile?.isEffectivelyOnline(nowMs) == true
                                     val title = conversationDisplayName(conv, myProfile.uid, profilesMap)
                                     val isMuted = myProfile.uid in conv.mutedBy
+                                    val pendingForChat = pendingMessages.filter { it.chatId == conv.id }
 
                                     val lastMsgTs = (conv.lastMessageAt?.seconds ?: 0L) * 1000L
                                     val lastRead = readTimestamps[conv.id] ?: 0L
@@ -296,8 +330,8 @@ fun ChatsListScreen(
                                                     displayName = title,
                                                     avatarBase64 = peerProfile?.avatarBase64,
                                                     size = 48.dp,
-                                                    showOnlineDot = peerProfile?.onlineStatusVisible == true,
-                                                    isOnline = peerProfile?.online == true
+                                                    showOnlineDot = peerProfile == null || peerProfile.onlineStatusVisible,
+                                                    isOnline = peerIsOnline
                                                 )
                                             }
 
@@ -334,7 +368,15 @@ fun ChatsListScreen(
                                                 }
                                                 Spacer(Modifier.height(3.dp))
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    if (hasNewMessage) {
+                                                    if (pendingForChat.isNotEmpty()) {
+                                                        Icon(
+                                                            Icons.Default.Schedule,
+                                                            contentDescription = "Waiting for network",
+                                                            tint = WhatsAppOfflineGray,
+                                                            modifier = Modifier.size(13.dp)
+                                                        )
+                                                        Spacer(Modifier.width(4.dp))
+                                                    } else if (hasNewMessage) {
                                                         Box(
                                                             modifier = Modifier
                                                                 .size(8.dp)
@@ -344,7 +386,11 @@ fun ChatsListScreen(
                                                         Spacer(Modifier.width(6.dp))
                                                     }
                                                     Text(
-                                                        text = conv.lastMessageText ?: "Tap to start messaging",
+                                                        text = if (pendingForChat.isNotEmpty()) {
+                                                            "Waiting for network: ${pendingForChat.last().plaintext}"
+                                                        } else {
+                                                            conv.lastMessageText ?: "Tap to start messaging"
+                                                        },
                                                         style = MaterialTheme.typography.bodySmall,
                                                         color = if (hasNewMessage) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                                         fontWeight = if (hasNewMessage) FontWeight.Bold else FontWeight.Normal,
@@ -374,20 +420,20 @@ fun ChatsListScreen(
                                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                                         )
                                                     }
-                                                } else if (peerProfile != null && peerProfile.onlineStatusVisible) {
+                                                } else if (conv.type == "DIRECT" && (peerProfile == null || peerProfile.onlineStatusVisible)) {
                                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                                         Box(
                                                             modifier = Modifier
-                                                                .size(6.dp)
+                                                                .size(7.dp)
                                                                 .clip(CircleShape)
-                                                                .background(if (peerProfile.online) WhatsAppGreen else WhatsAppOfflineGray)
+                                                                .background(if (peerIsOnline) WhatsAppGreen else WhatsAppOfflineGray)
                                                         )
                                                         Spacer(Modifier.width(4.dp))
                                                         Text(
-                                                            text = if (peerProfile.online) "online" else "offline",
+                                                            text = if (peerIsOnline) "online" else "offline",
                                                             style = MaterialTheme.typography.labelSmall,
-                                                            color = if (peerProfile.online) WhatsAppEmerald else WhatsAppOfflineGray,
-                                                            fontWeight = if (peerProfile.online) FontWeight.SemiBold else FontWeight.Normal
+                                                            color = if (peerIsOnline) WhatsAppEmerald else WhatsAppOfflineGray,
+                                                            fontWeight = if (peerIsOnline) FontWeight.SemiBold else FontWeight.Normal
                                                         )
                                                     }
                                                 }
@@ -408,6 +454,7 @@ fun ChatsListScreen(
             .filter { it.uid != myProfile.uid && it.uid !in blockedSet }
         NewChatOrGroupDialog(
             availableUsers = users,
+            nowMs = nowMs,
             onDismiss = { showNewChatDialog = false },
             onStartDirectChat = { peer ->
                 scope.launch {
@@ -446,6 +493,7 @@ fun conversationDisplayName(
 @Composable
 private fun NewChatOrGroupDialog(
     availableUsers: List<PublicProfile>,
+    nowMs: Long,
     onDismiss: () -> Unit,
     onStartDirectChat: (PublicProfile) -> Unit,
     onCreateGroup: (String, String, List<PublicProfile>) -> Unit
@@ -539,8 +587,8 @@ private fun NewChatOrGroupDialog(
                                     displayName = user.displayName,
                                     avatarBase64 = user.avatarBase64,
                                     size = 38.dp,
-                                    showOnlineDot = true,
-                                    isOnline = user.online
+                                    showOnlineDot = user.onlineStatusVisible,
+                                    isOnline = user.isEffectivelyOnline(nowMs)
                                 )
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {

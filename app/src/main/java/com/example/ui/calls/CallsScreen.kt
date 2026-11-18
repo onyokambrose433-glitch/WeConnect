@@ -102,6 +102,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.CallRecord
 import com.example.data.model.PublicProfile
 import com.example.data.model.UiState
+import com.example.data.model.isEffectivelyOnline
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.WeConnectAvatar
 import com.example.ui.components.formatRelativeTime
@@ -130,6 +131,7 @@ fun CallsScreen(
 ) {
     val callsState by viewModel.callsState.collectAsStateWithLifecycle()
     val allProfilesState by viewModel.allProfilesState.collectAsStateWithLifecycle()
+    val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
     val profilesMap = remember(allProfilesState) {
         ((allProfilesState as? UiState.Success)?.data ?: emptyList()).associateBy { it.uid }
     }
@@ -266,7 +268,9 @@ fun CallsScreen(
                                             WeConnectAvatar(
                                                 displayName = peerName,
                                                 avatarBase64 = peerProfile.avatarBase64,
-                                                size = 46.dp
+                                                size = 46.dp,
+                                                showOnlineDot = !peerId.endsWith("_bot") && peerProfile.onlineStatusVisible,
+                                                isOnline = peerProfile.isEffectivelyOnline(nowMs)
                                             )
                                             Spacer(Modifier.width(12.dp))
                                             Column(modifier = Modifier.weight(1f)) {
@@ -393,7 +397,13 @@ fun CallsScreen(
                                     .padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                WeConnectAvatar(peer.displayName, peer.avatarBase64, size = 38.dp)
+                                WeConnectAvatar(
+                                    displayName = peer.displayName,
+                                    avatarBase64 = peer.avatarBase64,
+                                    size = 38.dp,
+                                    showOnlineDot = peer.onlineStatusVisible,
+                                    isOnline = peer.isEffectivelyOnline(nowMs)
+                                )
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(peer.displayName, style = MaterialTheme.typography.titleSmall)

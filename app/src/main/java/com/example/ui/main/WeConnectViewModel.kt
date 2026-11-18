@@ -15,12 +15,14 @@ import com.example.data.model.PublicProfile
 import com.example.data.model.SocialPost
 import com.example.data.model.StoryItem
 import com.example.data.model.UiState
+import com.example.data.remote.NetworkMonitor
 import com.example.data.remote.extractFirestoreMessage
 import com.example.data.repository.AuthProfileRepository
 import com.example.data.repository.CommunityCallRepository
 import com.example.data.repository.MessagingRepository
 import com.example.data.repository.SocialRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -32,7 +34,25 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.UUID
+
+data class PendingOutgoingMessage(
+    val id: String = UUID.randomUUID().toString(),
+    val chatId: String,
+    val conversation: Conversation,
+    val senderProfile: PublicProfile,
+    val plaintext: String,
+    val messageType: String = "TEXT",
+    val mediaBase64: String? = null,
+    val mediaMimeType: String? = null,
+    val fileName: String? = null,
+    val replyToMessageId: String? = null,
+    val replyToPreview: String? = null,
+    val forwarded: Boolean = false,
+    val createdAtMs: Long = System.currentTimeMillis()
+)
 
 class WeConnectViewModel(
     val currentUserId: String,
@@ -40,11 +60,20 @@ class WeConnectViewModel(
     val messagingRepo: MessagingRepository,
     val socialRepo: SocialRepository,
     val communityCallRepo: CommunityCallRepository,
-    val crypto: WeConnectCrypto
+    val crypto: WeConnectCrypto,
+    val networkMonitor: NetworkMonitor
 ) : ViewModel() {
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val messages = _messages.asSharedFlow()
+
+    val isOnlineNetwork: StateFlow<Boolean> = networkMonitor.isOnline
+
+    private val _nowMsTicker = MutableStateFlow(System.currentTimeMillis())
+    val nowMsTicker: StateFlow<Long> = _nowMsTicker.asStateFlow()
+
+    private val _pendingMessages = MutableStateFlow<List<PendingOutgoingMessage>>(emptyList())
+    val pendingMessages: StateFlow<List<PendingOutgoingMessage>> = _pendingMessages.asStateFlow()
 
     private val _deviceIdentity = MutableStateFlow<DeviceIdentity?>(null)
     val deviceIdentity: StateFlow<DeviceIdentity?> = _deviceIdentity.asStateFlow()
@@ -145,6 +174,107 @@ class WeConnectViewModel(
         viewModelScope.launch {
             _deviceIdentity.value = crypto.getOrCreateDeviceIdentity(currentUserId)
         }
+        // Periodic ticker to keep peer online/offline staleness UI accurate
+        viewModelScope.launch {
+            while (isActive) {
+                delay(25_000L)
+                _nowMsTicker.value = System.currentTimeMillis()
+            }
+        }
+        // Automatically flush queued offline messages & restore online presence on reconnect
+        viewModelScope.launch {
+            networkMonitor.isOnline
+                .collect { online ->
+                    if (online) {
+                        authRepo.setOnlineStatus(true)
+                        flushPendingMessages()
+                    }
+                }
+        }
+    }
+
+    suspend fun sendMessageOrQueueOffline(
+        conversation: Conversation,
+        senderProfile: PublicProfile,
+        plaintext: String,
+        messageType: String = "TEXT",
+        mediaBase64: String? = null,
+        mediaMimeType: String? = null,
+        fileName: String? = null,
+        replyToMessageId: String? = null,
+        replyToPreview: String? = null,
+        forwarded: Boolean = false
+    ) {
+        val cleanText = plaintext.trim()
+        if (cleanText.isEmpty() && mediaBase64 == null) return
+
+        val onlineNow = networkMonitor.checkCurrentlyConnected() && networkMonitor.isOnline.value
+        if (!onlineNow) {
+            val queued = PendingOutgoingMessage(
+                chatId = conversation.id,
+                conversation = conversation,
+                senderProfile = senderProfile,
+                plaintext = cleanText,
+                messageType = messageType,
+                mediaBase64 = mediaBase64,
+                mediaMimeType = mediaMimeType,
+                fileName = fileName,
+                replyToMessageId = replyToMessageId,
+                replyToPreview = replyToPreview,
+                forwarded = forwarded
+            )
+            _pendingMessages.update { it + queued }
+            emitNotice("You are offline · Message not sent yet (waiting for network)")
+            return
+        }
+
+        handleResult(
+            messagingRepo.sendMessage(
+                conversation = conversation,
+                senderProfile = senderProfile,
+                plaintext = cleanText,
+                messageType = messageType,
+                mediaBase64 = mediaBase64,
+                mediaMimeType = mediaMimeType,
+                fileName = fileName,
+                replyToMessageId = replyToMessageId,
+                replyToPreview = replyToPreview,
+                forwarded = forwarded
+            )
+        )
+    }
+
+    fun cancelPendingMessage(pendingId: String) {
+        _pendingMessages.update { list -> list.filterNot { it.id == pendingId } }
+        emitNotice("Unsent message cancelled")
+    }
+
+    private suspend fun flushPendingMessages() {
+        val queue = _pendingMessages.value.toList()
+        if (queue.isEmpty()) return
+        var sentCount = 0
+        for (item in queue) {
+            if (!networkMonitor.checkCurrentlyConnected()) break
+            val res = messagingRepo.sendMessage(
+                conversation = item.conversation,
+                senderProfile = item.senderProfile,
+                plaintext = item.plaintext,
+                messageType = item.messageType,
+                mediaBase64 = item.mediaBase64,
+                mediaMimeType = item.mediaMimeType,
+                fileName = item.fileName,
+                replyToMessageId = item.replyToMessageId,
+                replyToPreview = item.replyToPreview,
+                forwarded = item.forwarded
+            )
+            if (res.isSuccess) {
+                _pendingMessages.update { list -> list.filterNot { it.id == item.id } }
+                sentCount++
+            }
+        }
+        if (sentCount > 0) {
+            emitNotice("Back online · Sent $sentCount waiting message${if (sentCount > 1) "s" else ""}")
+        }
     }
 
     fun syncCurrentDevice() {
@@ -152,7 +282,9 @@ class WeConnectViewModel(
             if (_deviceIdentity.value == null) {
                 _deviceIdentity.value = crypto.getOrCreateDeviceIdentity(currentUserId)
             }
-            authRepo.syncCurrentDeviceKey()
+            if (networkMonitor.checkCurrentlyConnected()) {
+                authRepo.syncCurrentDeviceKey()
+            }
         }
     }
 
@@ -167,5 +299,10 @@ class WeConnectViewModel(
         }.onFailure { err ->
             emitNotice(err.localizedMessage ?: "Operation failed")
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        networkMonitor.unregister()
     }
 }

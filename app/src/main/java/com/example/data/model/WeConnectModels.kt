@@ -24,7 +24,7 @@ data class PublicProfile(
     val publicKeyBase64: String? = null,
     val accountVisibility: String = "PUBLIC",
     val onlineStatusVisible: Boolean = true,
-    val online: Boolean = true,
+    val online: Boolean = false,
     val discoverable: Boolean = true,
     val followersCount: Long = 0L,
     val followingCount: Long = 0L,
@@ -33,6 +33,13 @@ data class PublicProfile(
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
+
+fun PublicProfile.isEffectivelyOnline(nowMs: Long = System.currentTimeMillis()): Boolean {
+    if (!onlineStatusVisible || !online) return false
+    val ts = lastSeenAt ?: updatedAt ?: return false
+    val ageMs = (nowMs - ts.seconds * 1000L).coerceAtLeast(0L)
+    return ageMs <= 120_000L
+}
 
 @Keep
 @IgnoreExtraProperties

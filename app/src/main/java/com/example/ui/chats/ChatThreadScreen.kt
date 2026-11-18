@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -72,12 +73,14 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -138,11 +141,13 @@ import com.example.data.media.VoiceNoteRecorder
 import com.example.data.model.ChatMessage
 import com.example.data.model.PublicProfile
 import com.example.data.model.UiState
+import com.example.data.model.isEffectivelyOnline
 import com.example.ui.components.GeminiChatAssistSheet
 import com.example.ui.components.WeConnectAvatar
 import com.example.ui.components.formatLastSeenTime
 import com.example.ui.components.formatTimeClock
 import com.example.ui.main.AiViewModel
+import com.example.ui.main.PendingOutgoingMessage
 import com.example.ui.main.WeConnectViewModel
 import com.example.ui.theme.PureWhite
 import com.example.ui.theme.WhatsAppCallRed
@@ -203,6 +208,12 @@ fun ChatThreadScreen(
 
     val privateUser by viewModel.privateUserState.collectAsStateWithLifecycle()
     val allProfilesState by viewModel.allProfilesState.collectAsStateWithLifecycle()
+    val isOnlineNetwork by viewModel.isOnlineNetwork.collectAsStateWithLifecycle()
+    val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
+    val pendingMessages by viewModel.pendingMessages.collectAsStateWithLifecycle()
+    val chatPendingMessages = remember(pendingMessages, chatId) {
+        pendingMessages.filter { it.chatId == chatId }
+    }
     val profilesMap = remember(allProfilesState) {
         ((allProfilesState as? UiState.Success)?.data ?: emptyList()).associateBy { it.uid }
     }
@@ -284,17 +295,15 @@ fun ChatThreadScreen(
             scope.launch {
                 val b64 = MediaUtils.compressUriToBase64(context, uri, maxDimension = 720, maxBase64Chars = 250_000)
                 if (b64 != null) {
-                    viewModel.handleResult(
-                        viewModel.messagingRepo.sendMessage(
-                            conversation = c,
-                            senderProfile = myProfile,
-                            plaintext = caption,
-                            messageType = "IMAGE",
-                            mediaBase64 = b64,
-                            mediaMimeType = "image/jpeg",
-                            replyToMessageId = reply?.first?.id,
-                            replyToPreview = reply?.let { formatStructuredReply(it.first, it.second) }
-                        )
+                    viewModel.sendMessageOrQueueOffline(
+                        conversation = c,
+                        senderProfile = myProfile,
+                        plaintext = caption,
+                        messageType = "IMAGE",
+                        mediaBase64 = b64,
+                        mediaMimeType = "image/jpeg",
+                        replyToMessageId = reply?.first?.id,
+                        replyToPreview = reply?.let { formatStructuredReply(it.first, it.second) }
                     )
                 } else {
                     viewModel.emitNotice("Photo exceeded max size")
@@ -312,17 +321,15 @@ fun ChatThreadScreen(
                 val fileName = MediaUtils.getFileDisplayName(context, uri)
                 val b64 = MediaUtils.readSmallFileBase64(context, uri)
                 if (b64 != null) {
-                    viewModel.handleResult(
-                        viewModel.messagingRepo.sendMessage(
-                            conversation = c,
-                            senderProfile = myProfile,
-                            plaintext = "Shared file: $fileName",
-                            messageType = "FILE",
-                            mediaBase64 = b64,
-                            fileName = fileName,
-                            replyToMessageId = reply?.first?.id,
-                            replyToPreview = reply?.let { formatStructuredReply(it.first, it.second) }
-                        )
+                    viewModel.sendMessageOrQueueOffline(
+                        conversation = c,
+                        senderProfile = myProfile,
+                        plaintext = "Shared file: $fileName",
+                        messageType = "FILE",
+                        mediaBase64 = b64,
+                        fileName = fileName,
+                        replyToMessageId = reply?.first?.id,
+                        replyToPreview = reply?.let { formatStructuredReply(it.first, it.second) }
                     )
                 } else {
                     viewModel.emitNotice("Document exceeds 220 KB limit")
@@ -332,20 +339,24 @@ fun ChatThreadScreen(
     }
 
     // Mark messages read/delivered
-    LaunchedEffect(messages.size, conv?.id) {
+    LaunchedEffect(messages.size, chatPendingMessages.size, conv?.id) {
         if (conv != null && messages.isNotEmpty()) {
             viewModel.messagingRepo.markMessagesRead(
                 chatId = conv.id,
                 messages = messages,
                 readReceiptsEnabled = privateUser?.readReceiptsEnabled != false
             )
-            listState.animateScrollToItem(messages.lastIndex)
+        }
+        val totalItems = messages.size + chatPendingMessages.size
+        if (totalItems > 0) {
+            listState.animateScrollToItem(totalItems - 1)
         }
     }
 
     // Typing indicator debounced
-    LaunchedEffect(inputText, conv?.id) {
+    LaunchedEffect(inputText, conv?.id, isOnlineNetwork) {
         val c = conv ?: return@LaunchedEffect
+        if (!isOnlineNetwork) return@LaunchedEffect
         if (inputText.isNotBlank()) {
             viewModel.messagingRepo.setTyping(c, myProfile.displayName, true)
             delay(2500)
@@ -376,6 +387,7 @@ fun ChatThreadScreen(
                     }
                 },
                 title = {
+                    val peerIsOnline = peerProfile?.isEffectivelyOnline(nowMs) == true
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable { showChatInfo = true }
@@ -384,8 +396,8 @@ fun ChatThreadScreen(
                             displayName = title,
                             avatarBase64 = peerProfile?.avatarBase64,
                             size = 36.dp,
-                            showOnlineDot = peerProfile?.onlineStatusVisible == true,
-                            isOnline = peerProfile?.online == true
+                            showOnlineDot = conv?.type == "DIRECT" && peerProfile != null && peerProfile.onlineStatusVisible,
+                            isOnline = peerIsOnline
                         )
                         Spacer(Modifier.width(10.dp))
                         Column {
@@ -400,28 +412,29 @@ fun ChatThreadScreen(
                                     Icon(Icons.Default.NotificationsOff, contentDescription = "Muted", tint = WhatsAppOfflineGray, modifier = Modifier.size(13.dp))
                                 }
                             }
-                            val isOnline = peerProfile?.online == true && peerProfile.onlineStatusVisible
                             val subtitle = when {
+                                !isOnlineNetwork -> "Waiting for network…"
                                 typingList.isNotEmpty() -> "${typingList.first().displayName} is typing…"
                                 conv?.type == "GROUP" -> "${conv.memberUids.size} members"
-                                isOnline -> "online"
-                                peerProfile != null && peerProfile.onlineStatusVisible -> "last seen ${formatLastSeenTime(peerProfile.lastSeenAt)}"
+                                peerIsOnline -> "online"
+                                peerProfile != null && peerProfile.onlineStatusVisible ->
+                                    if (peerProfile.lastSeenAt != null) "last seen ${formatLastSeenTime(peerProfile.lastSeenAt)}" else "offline"
                                 else -> "end-to-end encrypted"
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (conv?.type == "DIRECT" && peerProfile != null && peerProfile.onlineStatusVisible && typingList.isEmpty()) {
+                                if (conv?.type == "DIRECT" && peerProfile != null && peerProfile.onlineStatusVisible && typingList.isEmpty() && isOnlineNetwork) {
                                     Box(
                                         modifier = Modifier
                                             .size(6.dp)
                                             .clip(CircleShape)
-                                            .background(if (isOnline) WhatsAppGreen else WhatsAppOfflineGray)
+                                            .background(if (peerIsOnline) WhatsAppGreen else WhatsAppOfflineGray)
                                     )
                                     Spacer(Modifier.width(4.dp))
                                 }
                                 Text(
                                     text = subtitle,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (typingList.isNotEmpty() || isOnline) WhatsAppEmerald else WhatsAppOfflineGray
+                                    color = if (isOnlineNetwork && (typingList.isNotEmpty() || peerIsOnline)) WhatsAppEmerald else WhatsAppOfflineGray
                                 )
                             }
                         }
@@ -493,6 +506,32 @@ fun ChatThreadScreen(
             )
 
             Column(modifier = Modifier.fillMaxSize()) {
+                AnimatedVisibility(visible = !isOnlineNetwork) {
+                    Surface(
+                        color = WhatsAppOfflineGray.copy(alpha = 0.22f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.WifiOff,
+                                contentDescription = "Offline",
+                                tint = WhatsAppOfflineGray,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "You are offline · Messages wait in queue until connected",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
                 AnimatedVisibility(visible = searchInChat) {
                     Surface(
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
@@ -547,7 +586,7 @@ fun ChatThreadScreen(
 
                 // Messages Stream
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    if (messages.isEmpty()) {
+                    if (messages.isEmpty() && chatPendingMessages.isEmpty()) {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -581,12 +620,10 @@ fun ChatThreadScreen(
                                             onClick = {
                                                 val c = conv ?: return@AssistChip
                                                 scope.launch {
-                                                    viewModel.handleResult(
-                                                        viewModel.messagingRepo.sendMessage(
-                                                            conversation = c,
-                                                            senderProfile = myProfile,
-                                                            plaintext = "Hey there! 👋"
-                                                        )
+                                                    viewModel.sendMessageOrQueueOffline(
+                                                        conversation = c,
+                                                        senderProfile = myProfile,
+                                                        plaintext = "Hey there! 👋"
                                                     )
                                                 }
                                             },
@@ -708,6 +745,12 @@ fun ChatThreadScreen(
                                     )
                                 }
                             }
+                            items(chatPendingMessages, key = { it.id }) { pending ->
+                                PendingMessageBubble(
+                                    pending = pending,
+                                    onCancel = { viewModel.cancelPendingMessage(pending.id) }
+                                )
+                            }
                         }
                     }
 
@@ -828,7 +871,12 @@ fun ChatThreadScreen(
                             onValueChange = { inputText = it.take(1800) },
                             placeholder = {
                                 Text(
-                                    text = if (isRecording) "Recording voice note…" else if (replyTarget != null) "Write a reply…" else "Message"
+                                    text = when {
+                                        isRecording -> "Recording voice note…"
+                                        !isOnlineNetwork -> "Offline · Waiting for network…"
+                                        replyTarget != null -> "Write a reply…"
+                                        else -> "Message"
+                                    }
                                 )
                             },
                             shape = RoundedCornerShape(24.dp),
@@ -853,17 +901,15 @@ fun ChatThreadScreen(
                                             val reply = replyTarget
                                             replyTarget = null
                                             scope.launch {
-                                                viewModel.handleResult(
-                                                    viewModel.messagingRepo.sendMessage(
-                                                        conversation = c,
-                                                        senderProfile = myProfile,
-                                                        plaintext = "Voice note",
-                                                        messageType = "VOICE",
-                                                        mediaBase64 = audioB64,
-                                                        mediaMimeType = "audio/mp4",
-                                                        replyToMessageId = reply?.first?.id,
-                                                        replyToPreview = reply?.let { formatStructuredReply(it.first, it.second) }
-                                                    )
+                                                viewModel.sendMessageOrQueueOffline(
+                                                    conversation = c,
+                                                    senderProfile = myProfile,
+                                                    plaintext = "Voice note",
+                                                    messageType = "VOICE",
+                                                    mediaBase64 = audioB64,
+                                                    mediaMimeType = "audio/mp4",
+                                                    replyToMessageId = reply?.first?.id,
+                                                    replyToPreview = reply?.let { formatStructuredReply(it.first, it.second) }
                                                 )
                                             }
                                         } else {
@@ -883,7 +929,7 @@ fun ChatThreadScreen(
                                 modifier = Modifier
                                     .size(48.dp)
                                     .clip(CircleShape)
-                                    .background(if (isRecording) WhatsAppCallRed else WhatsAppEmerald)
+                                    .background(if (isRecording) WhatsAppCallRed else if (isOnlineNetwork) WhatsAppEmerald else WhatsAppOfflineGray)
                                     .testTag("voice_record_button")
                             ) {
                                 Icon(
@@ -899,21 +945,27 @@ fun ChatThreadScreen(
                                     val txt = inputText
                                     val editing = editingMessage
                                     val reply = replyTarget
-                                    inputText = ""
-                                    editingMessage = null
-                                    replyTarget = null
-                                    scope.launch {
-                                        if (editing != null) {
+                                    if (editing != null) {
+                                        if (!isOnlineNetwork) {
+                                            viewModel.emitNotice("You are offline · Connect to the internet to edit messages")
+                                            return@IconButton
+                                        }
+                                        inputText = ""
+                                        editingMessage = null
+                                        replyTarget = null
+                                        scope.launch {
                                             viewModel.handleResult(viewModel.messagingRepo.editMessage(c, editing, txt))
-                                        } else {
-                                            viewModel.handleResult(
-                                                viewModel.messagingRepo.sendMessage(
-                                                    conversation = c,
-                                                    senderProfile = myProfile,
-                                                    plaintext = txt,
-                                                    replyToMessageId = reply?.first?.id,
-                                                    replyToPreview = reply?.let { formatStructuredReply(it.first, it.second) }
-                                                )
+                                        }
+                                    } else {
+                                        inputText = ""
+                                        replyTarget = null
+                                        scope.launch {
+                                            viewModel.sendMessageOrQueueOffline(
+                                                conversation = c,
+                                                senderProfile = myProfile,
+                                                plaintext = txt,
+                                                replyToMessageId = reply?.first?.id,
+                                                replyToPreview = reply?.let { formatStructuredReply(it.first, it.second) }
                                             )
                                         }
                                     }
@@ -921,10 +973,14 @@ fun ChatThreadScreen(
                                 modifier = Modifier
                                     .size(48.dp)
                                     .clip(CircleShape)
-                                    .background(WhatsAppEmerald)
+                                    .background(if (isOnlineNetwork) WhatsAppEmerald else WhatsAppOfflineGray)
                                     .testTag("send_message_button")
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = PureWhite)
+                                Icon(
+                                    imageVector = if (isOnlineNetwork) Icons.AutoMirrored.Filled.Send else Icons.Default.Schedule,
+                                    contentDescription = if (isOnlineNetwork) "Send" else "Waiting for network",
+                                    tint = PureWhite
+                                )
                             }
                         }
                     }
@@ -964,18 +1020,16 @@ fun ChatThreadScreen(
                                 .fillMaxWidth()
                                 .clickable {
                                     scope.launch {
-                                        viewModel.handleResult(
-                                            viewModel.messagingRepo.sendMessage(
-                                                conversation = targetConv,
-                                                senderProfile = myProfile,
-                                                plaintext = text,
-                                                messageType = msg.messageType,
-                                                mediaBase64 = msg.mediaBase64,
-                                                fileName = msg.fileName,
-                                                forwarded = true
-                                            ),
-                                            "Forwarded to $name"
+                                        viewModel.sendMessageOrQueueOffline(
+                                            conversation = targetConv,
+                                            senderProfile = myProfile,
+                                            plaintext = text,
+                                            messageType = msg.messageType,
+                                            mediaBase64 = msg.mediaBase64,
+                                            fileName = msg.fileName,
+                                            forwarded = true
                                         )
+                                        if (isOnlineNetwork) viewModel.emitNotice("Forwarded to $name")
                                         forwardingMessage = null
                                     }
                                 }
@@ -1562,6 +1616,96 @@ private fun MessageBubble(
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PendingMessageBubble(
+    pending: PendingOutgoingMessage,
+    onCancel: () -> Unit
+) {
+    val isDark = isSystemInDarkTheme()
+    val bubbleColor = if (isDark) WhatsAppDarkTeal.copy(alpha = 0.72f) else WhatsAppOutgoingBubbleLight.copy(alpha = 0.85f)
+    val textColor = if (isDark) WhatsAppDarkText else WhatsAppInkDark
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.End
+    ) {
+        Surface(
+            color = bubbleColor,
+            shadowElevation = 0.5.dp,
+            border = BorderStroke(1.dp, WhatsAppOfflineGray.copy(alpha = 0.45f)),
+            shape = RoundedCornerShape(topStart = 15.dp, topEnd = 15.dp, bottomStart = 15.dp, bottomEnd = 4.dp),
+            modifier = Modifier.widthIn(max = 315.dp)
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
+                if (!pending.replyToPreview.isNullOrBlank()) {
+                    val hasStruct = pending.replyToPreview.contains("::")
+                    val replySender = if (hasStruct) pending.replyToPreview.substringBefore("::") else "Reply"
+                    val replySnippet = if (hasStruct) pending.replyToPreview.substringAfter("::") else pending.replyToPreview
+                    Surface(
+                        color = textColor.copy(alpha = 0.06f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 4.dp)
+                    ) {
+                        Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .width(3.dp)
+                                    .height(24.dp)
+                                    .background(WhatsAppOfflineGray, RoundedCornerShape(4.dp))
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Column {
+                                Text(replySender, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = WhatsAppOfflineGray)
+                                Text(replySnippet, style = MaterialTheme.typography.bodySmall, color = textColor.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+
+                Text(
+                    text = when (pending.messageType) {
+                        "IMAGE" -> "📷 Photo · ${pending.plaintext}"
+                        "VOICE" -> "🎤 Voice note"
+                        "FILE" -> "📎 ${pending.fileName ?: pending.plaintext}"
+                        else -> pending.plaintext
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = textColor
+                )
+
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(
+                        text = "Waiting for network",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = WhatsAppOfflineGray
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Schedule,
+                        contentDescription = "Not sent yet (waiting for network)",
+                        tint = WhatsAppOfflineGray,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Cancel waiting message",
+                        tint = WhatsAppCallRed,
+                        modifier = Modifier
+                            .size(15.dp)
+                            .clickable { onCancel() }
+                    )
+                }
             }
         }
     }

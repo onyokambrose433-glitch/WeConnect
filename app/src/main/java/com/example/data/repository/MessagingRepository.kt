@@ -27,7 +27,8 @@ import java.util.UUID
 class MessagingRepository(
     private val db: FirebaseFirestore,
     private val crypto: WeConnectCrypto,
-    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
+    private val isNetworkOnline: () -> Boolean = { true }
 ) {
 
     private fun requireUserId(): String {
@@ -245,6 +246,9 @@ class MessagingRepository(
     ): Result<Unit> {
         var path = "conversations/${conversation.id}/messages"
         return try {
+            if (!isNetworkOnline()) {
+                return Result.failure(IllegalStateException("You are offline. Message not sent — waiting for network."))
+            }
             val uid = requireUserId()
             val cleanText = plaintext.trim().take(1800)
             require(cleanText.isNotEmpty() || mediaBase64 != null) { "Message cannot be empty." }
@@ -346,6 +350,9 @@ class MessagingRepository(
     suspend fun editMessage(conversation: Conversation, message: ChatMessage, newText: String): Result<Unit> {
         var path = "conversations/${conversation.id}/messages/${message.id}"
         return try {
+            if (!isNetworkOnline()) {
+                return Result.failure(IllegalStateException("You are offline. Cannot edit message without internet."))
+            }
             val uid = requireUserId()
             require(message.senderId == uid) { "Only sender can edit." }
             val clean = newText.trim().take(1800)
@@ -384,6 +391,9 @@ class MessagingRepository(
     suspend fun deleteMessageForAll(chatId: String, messageId: String): Result<Unit> {
         var path = "conversations/$chatId/messages/$messageId"
         return try {
+            if (!isNetworkOnline()) {
+                return Result.failure(IllegalStateException("You are offline. Cannot delete message without internet."))
+            }
             requireUserId()
             val ref = db.collection("conversations").document(chatId).collection("messages").document(messageId)
             path = ref.path

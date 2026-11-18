@@ -92,6 +92,7 @@ import com.example.data.model.Conversation
 import com.example.data.model.PublicProfile
 import com.example.data.model.UiState
 import com.example.data.notification.WeConnectNotifier
+import com.example.data.remote.NetworkMonitor
 import com.example.data.remote.configureAppCheck
 import com.example.data.repository.AuthProfileRepository
 import com.example.data.repository.CommunityCallRepository
@@ -197,13 +198,19 @@ private fun AuthenticatedRoot(
                 val databaseId = app.getString(R.string.firestore_database_id)
                 val db = FirebaseFirestore.getInstance(databaseId)
                 val crypto = WeConnectCrypto(app)
+                val netMonitor = NetworkMonitor(app)
                 WeConnectViewModel(
                     currentUserId = currentUserId,
                     authRepo = AuthProfileRepository(db, crypto),
-                    messagingRepo = MessagingRepository(db, crypto),
+                    messagingRepo = MessagingRepository(
+                        db = db,
+                        crypto = crypto,
+                        isNetworkOnline = { netMonitor.isOnline.value && netMonitor.checkCurrentlyConnected() }
+                    ),
                     socialRepo = SocialRepository(db),
                     communityCallRepo = CommunityCallRepository(db),
-                    crypto = crypto
+                    crypto = crypto,
+                    networkMonitor = netMonitor
                 )
             }
         }
@@ -244,7 +251,11 @@ private fun AuthenticatedRoot(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> {
-                    scope.launch { viewModel.authRepo.setOnlineStatus(true) }
+                    scope.launch {
+                        if (viewModel.networkMonitor.checkCurrentlyConnected()) {
+                            viewModel.authRepo.setOnlineStatus(true)
+                        }
+                    }
                 }
                 Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
                     scope.launch { viewModel.authRepo.setOnlineStatus(false) }
@@ -253,7 +264,11 @@ private fun AuthenticatedRoot(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        scope.launch { viewModel.authRepo.setOnlineStatus(true) }
+        scope.launch {
+            if (viewModel.networkMonitor.checkCurrentlyConnected()) {
+                viewModel.authRepo.setOnlineStatus(true)
+            }
+        }
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             scope.launch { viewModel.authRepo.setOnlineStatus(false) }
@@ -262,8 +277,10 @@ private fun AuthenticatedRoot(
 
     LaunchedEffect(currentUserId) {
         while (isActive) {
-            delay(50_000)
-            viewModel.authRepo.setOnlineStatus(true)
+            delay(45_000)
+            if (viewModel.networkMonitor.checkCurrentlyConnected()) {
+                viewModel.authRepo.setOnlineStatus(true)
+            }
         }
     }
 
