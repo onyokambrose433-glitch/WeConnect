@@ -80,13 +80,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.media.MediaUtils
 import com.example.data.model.PublicProfile
@@ -587,77 +590,258 @@ private fun StoriesStrip(
     onCreateStory: () -> Unit,
     onOpenStory: (StoryItem) -> Unit
 ) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .width(72.dp)
-                    .clickable(onClick = onCreateStory)
-                    .testTag("add_story_button")
-            ) {
-                Box(contentAlignment = Alignment.BottomEnd) {
-                    WeConnectAvatar(
-                        displayName = myProfile.displayName,
-                        avatarBase64 = myProfile.avatarBase64,
-                        size = 58.dp
-                    )
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clip(CircleShape)
-                            .background(WhatsAppGreen)
-                            .border(2.dp, PureWhite, CircleShape)
-                    ) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = "Add Story",
-                            tint = PureWhite,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "My status",
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = "Status",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Surface(
+                    color = WhatsAppEmerald.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        text = if (stories.isEmpty()) "24h updates" else "${stories.size} active",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = WhatsAppTeal,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onCreateStory)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, tint = WhatsAppTeal, modifier = Modifier.size(16.dp))
+                Text(
+                    text = "Add status",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = WhatsAppTeal,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
 
-        items(stories, key = { it.id }) { story ->
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .width(72.dp)
-                    .clickable { onOpenStory(story) }
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(62.dp)
-                        .clip(CircleShape)
-                        .border(2.5.dp, WhatsAppGreen, CircleShape)
-                        .padding(3.dp)
-                ) {
-                    WeConnectAvatar(
-                        displayName = story.authorName,
-                        avatarBase64 = story.authorAvatarBase64,
-                        size = 56.dp
-                    )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item(key = "my_status_card") {
+                val myAvatarBitmap = remember(myProfile.avatarBase64) {
+                    MediaUtils.decodeBase64ToImageBitmap(myProfile.avatarBase64)
                 }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = story.authorName.split(" ").firstOrNull() ?: story.authorUsername,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.5.dp, WhatsAppEmerald.copy(alpha = 0.5f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier
+                        .width(96.dp)
+                        .height(136.dp)
+                        .clickable(onClick = onCreateStory)
+                        .testTag("add_story_button")
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        if (myAvatarBitmap != null) {
+                            Image(
+                                bitmap = myAvatarBitmap,
+                                contentDescription = "My status",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(WhatsAppTeal, WhatsAppDarkTeal, WhatsAppEmerald)
+                                        )
+                                    )
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            Color.Black.copy(alpha = 0.15f),
+                                            Color.Black.copy(alpha = 0.65f)
+                                        )
+                                    )
+                                )
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(8.dp)
+                        ) {
+                            WeConnectAvatar(
+                                displayName = myProfile.displayName,
+                                avatarBase64 = myProfile.avatarBase64,
+                                size = 34.dp
+                            )
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .align(Alignment.BottomEnd)
+                                    .clip(CircleShape)
+                                    .background(WhatsAppGreen)
+                                    .border(1.5.dp, PureWhite, CircleShape)
+                            ) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = "Add Story",
+                                    tint = PureWhite,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = "My status",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = PureWhite,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Tap to share",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = PureWhite.copy(alpha = 0.85f),
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+
+            items(stories, key = { it.id }) { story ->
+                val storyBitmap = remember(story.mediaBase64) {
+                    MediaUtils.decodeBase64ToImageBitmap(story.mediaBase64)
+                }
+                val bgColor = remember(story.bgColorHex) {
+                    runCatching { Color(android.graphics.Color.parseColor(story.bgColorHex)) }
+                        .getOrDefault(WhatsAppTeal)
+                }
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.5.dp, WhatsAppGreen),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier
+                        .width(96.dp)
+                        .height(136.dp)
+                        .clickable { onOpenStory(story) }
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        if (storyBitmap != null) {
+                            Image(
+                                bitmap = storyBitmap,
+                                contentDescription = story.authorName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(bgColor, bgColor.copy(alpha = 0.78f), WhatsAppDarkBg)
+                                        )
+                                    )
+                                    .padding(horizontal = 8.dp)
+                            ) {
+                                Text(
+                                    text = story.caption.ifBlank { "Status update" },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = PureWhite,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            Color.Black.copy(alpha = 0.25f),
+                                            Color.Transparent,
+                                            Color.Black.copy(alpha = 0.72f)
+                                        )
+                                    )
+                                )
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(7.dp)
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .border(
+                                    width = 2.dp,
+                                    brush = Brush.linearGradient(listOf(WhatsAppGreen, WhatsAppEmerald, PureWhite)),
+                                    shape = CircleShape
+                                )
+                                .padding(2.dp)
+                        ) {
+                            WeConnectAvatar(
+                                displayName = story.authorName,
+                                avatarBase64 = story.authorAvatarBase64,
+                                size = 32.dp
+                            )
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = story.authorName.split(" ").firstOrNull() ?: story.authorUsername,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = PureWhite,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = formatRelativeTime(story.createdAt),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = PureWhite.copy(alpha = 0.85f),
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
             }
         }
     }

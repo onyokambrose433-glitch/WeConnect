@@ -1,5 +1,6 @@
 package com.example
 
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -7,6 +8,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -14,13 +19,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.outlined.Chat
@@ -43,6 +54,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import com.example.ui.theme.WhatsAppCallRed
+import com.example.ui.theme.WhatsAppDarkSurface
+import com.example.ui.theme.WhatsAppDarkTeal
 import com.example.ui.theme.WhatsAppEmerald
 import com.example.ui.theme.WhatsAppGreen
 import com.example.ui.theme.WhatsAppOfflineGray
@@ -74,11 +87,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -114,6 +136,7 @@ import com.example.ui.communities.CommunitiesScreen
 import com.example.ui.communities.CommunityDetailScreen
 import com.example.ui.components.GeminiAssistantDialog
 import com.example.ui.components.NotificationsCenterSheet
+import com.example.ui.components.WeConnectAvatar
 import com.example.ui.components.WeConnectLogoMark
 import com.example.ui.home.HomeScreen
 import com.example.ui.main.AiViewModel
@@ -395,6 +418,7 @@ private fun WeConnectShell(
 
     val unreadChatsCount by viewModel.unreadChatsCount.collectAsStateWithLifecycle()
     val unreadNotifCount by viewModel.unreadNotificationsCount.collectAsStateWithLifecycle()
+    val isOnlineNetwork by viewModel.isOnlineNetwork.collectAsStateWithLifecycle()
     val notificationsList by viewModel.notifications.collectAsStateWithLifecycle()
     val recentNewcomers by viewModel.recentNewcomers.collectAsStateWithLifecycle()
     val conversationsState by viewModel.conversationsState.collectAsStateWithLifecycle()
@@ -521,74 +545,170 @@ private fun WeConnectShell(
             BackHandler { activeTab = MainTab.HOME }
         }
 
+        val view = LocalView.current
+        val isSystemDark = isSystemInDarkTheme()
+        DisposableEffect(view, isSystemDark) {
+            val window = (view.context as? Activity)?.window
+            val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+            controller?.isAppearanceLightStatusBars = false
+            onDispose {
+                controller?.isAppearanceLightStatusBars = !isSystemDark
+            }
+        }
+
+        val headerGradient = if (isSystemDark) {
+            Brush.linearGradient(listOf(WhatsAppDarkSurface, WhatsAppDarkTeal, Color(0xFF0A2E25)))
+        } else {
+            Brush.linearGradient(listOf(WhatsAppTeal, WhatsAppDarkTeal, Color(0xFF0B7A66)))
+        }
+
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val isWideScreen = maxWidth >= 600.dp
 
             Scaffold(
-                contentWindowInsets = WindowInsets.safeDrawing,
+                contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
                 snackbarHost = { SnackbarHost(snackbarHostState) },
                 topBar = {
-                    TopAppBar(
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            titleContentColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        title = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                WeConnectLogoMark(size = 34.dp)
-                                Spacer(Modifier.width(10.dp))
-                                Column {
-                                    Text(
-                                        text = "WeConnect",
-                                        style = MaterialTheme.typography.titleLarge,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text(
-                                        text = activeTab.label,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        },
-                        actions = {
-                            IconButton(
-                                onClick = { showNotificationsSheet = true },
-                                modifier = Modifier.testTag("top_notifications_button")
-                            ) {
-                                BadgedBox(
-                                    badge = {
-                                        if (unreadNotifCount > 0) {
-                                            Badge(
-                                                containerColor = WhatsAppCallRed,
-                                                contentColor = PureWhite
-                                            ) {
-                                                Text(if (unreadNotifCount > 99) "99+" else "$unreadNotifCount")
-                                            }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(headerGradient)
+                    ) {
+                        TopAppBar(
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = Color.Transparent,
+                                titleContentColor = PureWhite,
+                                actionIconContentColor = PureWhite
+                            ),
+                            title = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(11.dp))
+                                            .background(PureWhite.copy(alpha = 0.14f))
+                                            .border(1.dp, PureWhite.copy(alpha = 0.28f), RoundedCornerShape(11.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        WeConnectLogoMark(size = 30.dp)
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "WeConnect",
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = PureWhite,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(7.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        if (isOnlineNetwork) WhatsAppGreen else WhatsAppOfflineGray
+                                                    )
+                                            )
+                                            Text(
+                                                text = if (isOnlineNetwork) "${activeTab.label} · Online" else "${activeTab.label} · Offline",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = PureWhite.copy(alpha = 0.85f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                     }
+                                }
+                            },
+                            actions = {
+                                IconButton(
+                                    onClick = { showNotificationsSheet = true },
+                                    modifier = Modifier.testTag("top_notifications_button")
                                 ) {
-                                    Icon(
-                                        imageVector = if (unreadNotifCount > 0) Icons.Default.NotificationsActive else Icons.Default.Notifications,
-                                        contentDescription = "Notifications",
-                                        tint = if (unreadNotifCount > 0) WhatsAppEmerald else MaterialTheme.colorScheme.onSurface
-                                    )
+                                    BadgedBox(
+                                        badge = {
+                                            if (unreadNotifCount > 0) {
+                                                Badge(
+                                                    containerColor = WhatsAppCallRed,
+                                                    contentColor = PureWhite
+                                                ) {
+                                                    Text(if (unreadNotifCount > 99) "99+" else "$unreadNotifCount")
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = if (unreadNotifCount > 0) Icons.Default.NotificationsActive else Icons.Default.Notifications,
+                                            contentDescription = "Notifications",
+                                            tint = if (unreadNotifCount > 0) WhatsAppGreen else PureWhite
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = { showSearchDialog = true },
+                                    modifier = Modifier.testTag("global_search_button")
+                                ) {
+                                    Icon(Icons.Default.Search, contentDescription = "Global Search", tint = PureWhite)
+                                }
+                                IconButton(
+                                    onClick = { showGeminiDialog = true },
+                                    modifier = Modifier.testTag("open_gemini_button")
+                                ) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = "WeConnect AI (Gemini)", tint = WhatsAppGreen)
+                                }
+                                IconButton(
+                                    onClick = { activeTab = MainTab.PROFILE },
+                                    modifier = Modifier
+                                        .padding(end = 4.dp)
+                                        .testTag("topbar_profile_avatar")
+                                        .semantics { contentDescription = "Open profile" }
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .border(
+                                                width = if (activeTab == MainTab.PROFILE) 2.dp else 1.5.dp,
+                                                color = if (activeTab == MainTab.PROFILE) WhatsAppGreen else PureWhite.copy(alpha = 0.78f),
+                                                shape = CircleShape
+                                            )
+                                            .padding(2.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        WeConnectAvatar(
+                                            displayName = myProfile.displayName,
+                                            avatarBase64 = myProfile.avatarBase64,
+                                            size = 32.dp,
+                                            showOnlineDot = myProfile.onlineStatusVisible,
+                                            isOnline = isOnlineNetwork && myProfile.online
+                                        )
+                                    }
                                 }
                             }
-                            IconButton(
-                                onClick = { showSearchDialog = true },
-                                modifier = Modifier.testTag("global_search_button")
-                            ) {
-                                Icon(Icons.Default.Search, contentDescription = "Global Search", tint = MaterialTheme.colorScheme.onSurface)
-                            }
-                            IconButton(
-                                onClick = { showGeminiDialog = true },
-                                modifier = Modifier.testTag("open_gemini_button")
-                            ) {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = "WeConnect AI (Gemini)", tint = WhatsAppTeal)
-                            }
-                        }
-                    )
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(
+                                            WhatsAppGreen.copy(alpha = 0.25f),
+                                            WhatsAppGreen.copy(alpha = 0.85f),
+                                            WhatsAppGreen.copy(alpha = 0.25f)
+                                        )
+                                    )
+                                )
+                        )
+                    }
                 },
                 bottomBar = {
                     if (!isWideScreen) {
