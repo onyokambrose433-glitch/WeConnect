@@ -3,14 +3,17 @@ package com.example
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.crypto.WeConnectCrypto
+import com.example.data.model.PostComment
 import com.example.data.model.PublicProfile
 import com.example.data.model.isEffectivelyOnline
 import com.example.data.repository.AuthProfileRepository
+import com.example.ui.home.buildCommentThreads
 import com.google.firebase.Timestamp
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -62,6 +65,29 @@ class ExampleRobolectricTest {
         // Active online user with fresh heartbeat -> online (green dot)
         val activeOnline = PublicProfile(uid = "peer_5", online = true, onlineStatusVisible = true, lastSeenAt = freshTs)
         assertTrue(activeOnline.isEffectivelyOnline(nowMs))
+    }
+
+    @Test
+    fun `comment threading groups direct replies, nested replies, and orphan replies safely`() {
+        val c1 = PostComment(id = "c1", postId = "p1", authorUsername = "alice", text = "Great photo!")
+        val r1 = PostComment(id = "r1", postId = "p1", authorUsername = "bob", text = "Totally agree", replyToCommentId = "c1")
+        val r2 = PostComment(id = "r2", postId = "p1", authorUsername = "carol", text = "Thanks Bob!", replyToCommentId = "r1")
+        val c2 = PostComment(id = "c2", postId = "p1", authorUsername = "dan", text = "Where was this?")
+        val orphan = PostComment(id = "r3", postId = "p1", authorUsername = "eve", text = "Deleted parent reply", replyToCommentId = "missing_id")
+
+        val threads = buildCommentThreads(listOf(c1, r1, r2, c2, orphan))
+
+        assertEquals(3, threads.size)
+        assertEquals("c1", threads[0].root.id)
+        assertEquals(listOf("r1", "r2"), threads[0].replies.map { it.comment.id })
+        assertEquals("c1", threads[0].replies[0].directParent?.id)
+        assertEquals("r1", threads[0].replies[1].directParent?.id)
+
+        assertEquals("c2", threads[1].root.id)
+        assertTrue(threads[1].replies.isEmpty())
+
+        assertEquals("r3", threads[2].root.id)
+        assertNull(threads[2].replies.firstOrNull())
     }
 
     @Test

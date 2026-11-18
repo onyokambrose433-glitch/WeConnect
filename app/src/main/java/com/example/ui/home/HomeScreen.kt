@@ -29,7 +29,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
@@ -69,6 +68,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -545,11 +545,21 @@ fun HomeScreen(
     }
 
     commentsPost?.let { post ->
-        ModalBottomSheet(onDismissRequest = { commentsPost = null }) {
+        val commentsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { commentsPost = null },
+            sheetState = commentsSheetState
+        ) {
             PostCommentsSheet(
                 post = post,
                 myProfile = myProfile,
-                viewModel = viewModel
+                profilesMap = profilesMap,
+                nowMs = nowMs,
+                viewModel = viewModel,
+                onOpenUserProfile = { uid ->
+                    commentsPost = null
+                    onOpenUserProfile(uid)
+                }
             )
         }
     }
@@ -1467,108 +1477,4 @@ private fun StoryViewerDialog(
         },
         confirmButton = {}
     )
-}
-
-@Composable
-private fun PostCommentsSheet(
-    post: SocialPost,
-    myProfile: PublicProfile,
-    viewModel: WeConnectViewModel
-) {
-    val scope = rememberCoroutineScope()
-    val comments by remember(post.id) {
-        viewModel.socialRepo.observePostComments(post.id)
-    }.collectAsStateWithLifecycle(initialValue = emptyList())
-
-    var commentText by remember { mutableStateOf("") }
-    var replyTargetId by remember { mutableStateOf<String?>(null) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-    ) {
-        Text("Comments (${comments.size})", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(260.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (comments.isEmpty()) {
-                item {
-                    Text(
-                        "No comments yet. Start the conversation!",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                items(comments, key = { it.id }) { comment ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "${comment.authorName} (@${comment.authorUsername})",
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                                Text(
-                                    text = formatRelativeTime(comment.createdAt),
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                            if (comment.replyToCommentId != null) {
-                                Text(
-                                    text = "Replying to comment",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text(comment.text, style = MaterialTheme.typography.bodyMedium)
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = commentText,
-                onValueChange = { commentText = it.take(600) },
-                placeholder = { Text("Write a comment…") },
-                modifier = Modifier.weight(1f),
-                singleLine = true
-            )
-            Spacer(Modifier.width(8.dp))
-            IconButton(
-                onClick = {
-                    val txt = commentText
-                    commentText = ""
-                    scope.launch {
-                        viewModel.handleResult(
-                            viewModel.socialRepo.addComment(myProfile, post, txt, replyTargetId)
-                        )
-                        replyTargetId = null
-                    }
-                },
-                enabled = commentText.isNotBlank()
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send Comment", tint = MaterialTheme.colorScheme.primary)
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-    }
 }

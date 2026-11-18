@@ -339,13 +339,20 @@ class SocialRepository(
         myProfile: PublicProfile,
         post: SocialPost,
         text: String,
-        replyToCommentId: String? = null
+        replyToCommentId: String? = null,
+        replyToComment: PostComment? = null
     ): Result<Unit> {
         var path = "posts/${post.id}/comments"
         return try {
             val uid = requireUserId()
             val clean = text.trim().take(600)
             require(clean.isNotEmpty()) { "Comment cannot be blank." }
+            val safeReplyId = replyToCommentId?.trim()?.takeIf {
+                it.isNotEmpty() && it.length <= 128 && it.matches(Regex("^[a-zA-Z0-9_\\-]+$"))
+            }
+            val safeAuthorName = myProfile.displayName.trim().take(50).ifBlank { "User" }
+            val safeActorName = myProfile.displayName.trim().take(60).ifBlank { "WeConnect User" }
+
             val commentRef = db.collection("posts").document(post.id).collection("comments").document()
             path = commentRef.path
 
@@ -353,10 +360,10 @@ class SocialRepository(
             val payload = mapOf(
                 "postId" to post.id,
                 "authorId" to uid,
-                "authorName" to myProfile.displayName.take(50),
+                "authorName" to safeAuthorName,
                 "authorUsername" to myProfile.username,
                 "text" to clean,
-                "replyToCommentId" to replyToCommentId,
+                "replyToCommentId" to safeReplyId,
                 "createdAt" to FieldValue.serverTimestamp()
             ).filterValues { it != null }
             batch.set(commentRef, payload)
@@ -365,16 +372,39 @@ class SocialRepository(
                 mapOf("commentsCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
             )
             if (post.authorId != uid) {
-                val notifRef = db.collection("users").document(post.authorId).collection("notifications").document()
+                val postNotifRef = db.collection("users").document(post.authorId).collection("notifications").document()
+                val summaryPrefix = if (replyToComment?.authorId == post.authorId) {
+                    "$safeActorName replied to your comment: "
+                } else {
+                    "$safeActorName commented: "
+                }
                 batch.set(
-                    notifRef,
+                    postNotifRef,
                     mapOf(
                         "recipientUid" to post.authorId,
                         "actorUid" to uid,
-                        "actorName" to myProfile.displayName.take(60),
+                        "actorName" to safeActorName,
                         "type" to "COMMENT",
                         "targetId" to post.id,
-                        "summary" to "${myProfile.displayName} commented: ${clean.take(80)}",
+                        "summary" to (summaryPrefix + clean.take(80)).take(200),
+                        "read" to false,
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            if (replyToComment != null && replyToComment.authorId.isNotBlank() &&
+                replyToComment.authorId != uid && replyToComment.authorId != post.authorId
+            ) {
+                val replyNotifRef = db.collection("users").document(replyToComment.authorId).collection("notifications").document()
+                batch.set(
+                    replyNotifRef,
+                    mapOf(
+                        "recipientUid" to replyToComment.authorId,
+                        "actorUid" to uid,
+                        "actorName" to safeActorName,
+                        "type" to "COMMENT",
+                        "targetId" to post.id,
+                        "summary" to "$safeActorName replied to your comment: ${clean.take(80)}".take(200),
                         "read" to false,
                         "createdAt" to FieldValue.serverTimestamp()
                     )
@@ -386,6 +416,39 @@ class SocialRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteComment(postId: String, commentId: String): Result<Unit> {
+        var path = "posts/$postId/comments/$commentId"
+        return try {
+            requireUserId()
+            require(postId.isNotBlank() && commentId.isNotBlank()) { "Invalid comment reference." }
+            val postRef = db.collection("posts").document(postId)
+            val commentRef = postRef.collection("comments").document(commentId)
+            path = commentRef.path
+
+            val currentCount = try {
+                postRef.get().await().getLong("commentsCount") ?: 0L
+            } catch (_: Exception) {
+                0L
+            }
+
+            val batch = db.batch()
+            batch.delete(commentRef)
+            if (currentCount > 0L) {
+                batch.update(
+                    postRef,
+                    mapOf("commentsCount" to FieldValue.increment(-1L), "updatedAt" to FieldValue.serverTimestamp())
+                )
+            }
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
             Result.failure(e)
         }
     }
