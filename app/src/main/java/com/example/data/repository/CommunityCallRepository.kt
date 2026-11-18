@@ -94,6 +94,17 @@ class CommunityCallRepository(
         )
     }
 
+    private fun sanitizeDisplayName(raw: String): String {
+        return raw.trim().ifBlank { "WeConnect User" }.take(50)
+    }
+
+    private fun sanitizeUsername(raw: String, uid: String): String {
+        val clean = raw.trim().lowercase().replace(Regex("[^a-z0-9_]"), "")
+        if (clean.length in 3..30) return clean
+        val fallbackUid = uid.lowercase().replace(Regex("[^a-z0-9_]"), "").ifBlank { "member" }
+        return ("user_$fallbackUid").take(30).padEnd(3, '0')
+    }
+
     suspend fun createCommunity(
         owner: PublicProfile,
         name: String,
@@ -109,9 +120,8 @@ class CommunityCallRepository(
             require(cleanName.length >= 2) { "Name must be at least 2 characters." }
             val commRef = db.collection("communities").document()
             path = commRef.path
-            val safeDisplayName = owner.displayName.trim().ifBlank { "WeConnect User" }.take(50)
-            val cleanUsername = owner.username.trim().lowercase().replace(Regex("[^a-z0-9_]"), "").ifBlank { "user_" + uid.take(6).lowercase() }
-            val safeUsername = if (cleanUsername.length in 3..30) cleanUsername else ("user_" + uid.take(6).lowercase()).take(30)
+            val safeDisplayName = sanitizeDisplayName(owner.displayName)
+            val safeUsername = sanitizeUsername(owner.username, uid)
 
             commRef.set(
                 mapOf(
@@ -155,30 +165,37 @@ class CommunityCallRepository(
         var path = "communities/${community.id}/members"
         return try {
             val uid = requireUserId()
-            val memberRef = db.collection("communities").document(community.id)
-                .collection("members").document(uid)
+            val commRef = db.collection("communities").document(community.id)
+            val memberRef = commRef.collection("members").document(uid)
             path = memberRef.path
+            val memberSnap = memberRef.get().await()
+            val commSnap = commRef.get().await()
+            val currentCount = (commSnap.getLong("memberCount") ?: 0L).coerceAtLeast(0L)
             val batch = db.batch()
             if (isMember) {
+                require(uid != community.ownerId) { "Community owner cannot leave without transferring ownership." }
+                if (!memberSnap.exists()) return Result.success(Unit)
                 batch.delete(memberRef)
+                val countUpdate: Any = if (currentCount > 0L) FieldValue.increment(-1L) else 0L
                 batch.update(
-                    db.collection("communities").document(community.id),
-                    mapOf("memberCount" to FieldValue.increment(-1L), "updatedAt" to FieldValue.serverTimestamp())
+                    commRef,
+                    mapOf("memberCount" to countUpdate, "updatedAt" to FieldValue.serverTimestamp())
                 )
             } else {
+                if (memberSnap.exists()) return Result.success(Unit)
                 batch.set(
                     memberRef,
                     mapOf(
                         "communityId" to community.id,
                         "uid" to uid,
-                        "displayName" to profile.displayName.take(50),
-                        "username" to profile.username,
+                        "displayName" to sanitizeDisplayName(profile.displayName),
+                        "username" to sanitizeUsername(profile.username, uid),
                         "role" to "MEMBER",
                         "joinedAt" to FieldValue.serverTimestamp()
                     )
                 )
                 batch.update(
-                    db.collection("communities").document(community.id),
+                    commRef,
                     mapOf("memberCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
                 )
             }
@@ -188,6 +205,151 @@ class CommunityCallRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun addMemberToCommunity(
+        community: Community,
+        actor: PublicProfile,
+        target: PublicProfile,
+        role: String = "MEMBER"
+    ): Result<Unit> {
+        var path = "communities/${community.id}/members/${target.uid}"
+        return try {
+            val uid = requireUserId()
+            require(uid == community.ownerId || uid in community.adminUids) {
+                "Only community admins can add people."
+            }
+            require(target.uid.isNotBlank()) { "Invalid user." }
+            val safeRole = if (role == "MODERATOR") "MODERATOR" else "MEMBER"
+            val commRef = db.collection("communities").document(community.id)
+            val memberRef = commRef.collection("members").document(target.uid)
+            path = memberRef.path
+
+            if (memberRef.get().await().exists()) {
+                return Result.success(Unit)
+            }
+
+            val batch = db.batch()
+            batch.set(
+                memberRef,
+                mapOf(
+                    "communityId" to community.id,
+                    "uid" to target.uid,
+                    "displayName" to sanitizeDisplayName(target.displayName),
+                    "username" to sanitizeUsername(target.username, target.uid),
+                    "role" to safeRole,
+                    "joinedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.update(
+                commRef,
+                mapOf(
+                    "memberCount" to FieldValue.increment(1L),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            batch.commit().await()
+
+            if (target.uid != uid) {
+                try {
+                    val safeActor = actor.displayName.trim().ifBlank { "An admin" }.take(60)
+                    db.collection("users").document(target.uid).collection("notifications").document().set(
+                        mapOf(
+                            "recipientUid" to target.uid,
+                            "actorUid" to uid,
+                            "actorName" to safeActor,
+                            "type" to "COMMUNITY",
+                            "targetId" to community.id,
+                            "summary" to "$safeActor added you to ${community.name}.".take(200),
+                            "read" to false,
+                            "createdAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } catch (_: Exception) {
+                    // Best-effort notification delivery
+                }
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun removeMemberFromCommunity(
+        community: Community,
+        actor: PublicProfile,
+        targetUid: String
+    ): Result<Unit> {
+        var path = "communities/${community.id}/members/$targetUid"
+        return try {
+            val uid = requireUserId()
+            require(uid == community.ownerId || uid in community.adminUids) {
+                "Only community admins can remove members."
+            }
+            require(targetUid.isNotBlank() && targetUid != community.ownerId) {
+                "The community owner cannot be removed."
+            }
+
+            val commRef = db.collection("communities").document(community.id)
+            val memberRef = commRef.collection("members").document(targetUid)
+            path = memberRef.path
+
+            val memberSnap = memberRef.get().await()
+            val commSnap = commRef.get().await()
+            val currentCount = (commSnap.getLong("memberCount") ?: 0L).coerceAtLeast(0L)
+            @Suppress("UNCHECKED_CAST")
+            val currentAdmins = (commSnap.get("adminUids") as? List<String>) ?: community.adminUids
+
+            if (!memberSnap.exists() && targetUid !in currentAdmins) {
+                return Result.success(Unit)
+            }
+
+            val batch = db.batch()
+            if (memberSnap.exists()) {
+                batch.delete(memberRef)
+            }
+
+            val commUpdates = mutableMapOf<String, Any>(
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (memberSnap.exists()) {
+                commUpdates["memberCount"] = if (currentCount > 0L) FieldValue.increment(-1L) else 0L
+            }
+            if (targetUid in currentAdmins && currentAdmins.size > 1) {
+                commUpdates["adminUids"] = currentAdmins.filter { it != targetUid }
+            }
+            batch.update(commRef, commUpdates)
+            batch.commit().await()
+
+            if (targetUid != uid) {
+                try {
+                    val safeActor = actor.displayName.trim().ifBlank { "An admin" }.take(60)
+                    db.collection("users").document(targetUid).collection("notifications").document().set(
+                        mapOf(
+                            "recipientUid" to targetUid,
+                            "actorUid" to uid,
+                            "actorName" to safeActor,
+                            "type" to "COMMUNITY",
+                            "targetId" to community.id,
+                            "summary" to "$safeActor removed you from ${community.name}.".take(200),
+                            "read" to false,
+                            "createdAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } catch (_: Exception) {
+                    // Best-effort notification delivery
+                }
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
             Result.failure(e)
         }
     }

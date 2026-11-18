@@ -556,16 +556,25 @@ service cloud.firestore {
       match /members/{uid} {
         allow get: if isSignedIn() && isValidId(uid);
         allow list: if isSignedIn() && existing().communityId == communityId;
-        allow create: if isOwner(uid) &&
+        allow create: if isSignedIn() &&
                          isValidId(uid) &&
                          incoming().communityId == communityId &&
                          incoming().uid == uid &&
                          incoming().displayName is string && incoming().displayName.size() >= 1 && incoming().displayName.size() <= 50 &&
                          isValidUsername(incoming().username) &&
                          incoming().role in ['ADMIN', 'MODERATOR', 'MEMBER'] &&
-                         (incoming().role == 'MEMBER' ||
-                          (existsAfter(/databases/$(database)/documents/communities/$(communityId)) && getAfter(/databases/$(database)/documents/communities/$(communityId)).data.ownerId == request.auth.uid) ||
-                          (exists(/databases/$(database)/documents/communities/$(communityId)) && get(/databases/$(database)/documents/communities/$(communityId)).data.ownerId == request.auth.uid)) &&
+                         (
+                           (isOwner(uid) && (
+                             incoming().role == 'MEMBER' ||
+                             (existsAfter(/databases/$(database)/documents/communities/$(communityId)) && getAfter(/databases/$(database)/documents/communities/$(communityId)).data.ownerId == request.auth.uid) ||
+                             (exists(/databases/$(database)/documents/communities/$(communityId)) && get(/databases/$(database)/documents/communities/$(communityId)).data.ownerId == request.auth.uid)
+                           )) ||
+                           (!isOwner(uid) &&
+                            exists(/databases/$(database)/documents/communities/$(communityId)) &&
+                            (request.auth.uid in get(/databases/$(database)/documents/communities/$(communityId)).data.adminUids ||
+                             get(/databases/$(database)/documents/communities/$(communityId)).data.ownerId == request.auth.uid) &&
+                            incoming().role in ['MEMBER', 'MODERATOR'])
+                         ) &&
                          isPastOrNowTs(incoming().joinedAt) &&
                          incoming().keys().hasAll(['communityId', 'uid', 'displayName', 'username', 'role', 'joinedAt']) &&
                          incoming().keys().hasOnly(['communityId', 'uid', 'displayName', 'username', 'role', 'joinedAt']);
@@ -578,7 +587,10 @@ service cloud.firestore {
                          incoming().diff(existing()).affectedKeys().hasOnly(['role']);
         allow delete: if isSignedIn() && isValidId(uid) && (
           request.auth.uid == uid ||
-          request.auth.uid in get(/databases/$(database)/documents/communities/$(communityId)).data.adminUids
+          (exists(/databases/$(database)/documents/communities/$(communityId)) &&
+           (request.auth.uid in get(/databases/$(database)/documents/communities/$(communityId)).data.adminUids ||
+            get(/databases/$(database)/documents/communities/$(communityId)).data.ownerId == request.auth.uid) &&
+           uid != get(/databases/$(database)/documents/communities/$(communityId)).data.ownerId)
         );
       }
 

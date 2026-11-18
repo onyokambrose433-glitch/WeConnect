@@ -377,6 +377,47 @@ test("Social Posts, Reactions, Comments, Stories & Communities", async () => {
     joinedAt: ts,
   });
   await assertSucceeds(batch.commit());
+
+  // Admin Alice can add Charlie to comm_1, update memberCount, and remove Bob/Charlie
+  await assertSucceeds(
+    aliceDb.collection("communities").doc("comm_1").collection("members").doc(CHARLIE_UID).set({
+      communityId: "comm_1",
+      uid: CHARLIE_UID,
+      displayName: "Charlie",
+      username: "charlie_dev",
+      role: "MEMBER",
+      joinedAt: pastDate(900),
+    })
+  );
+  // Non-admin Bob cannot add another user to comm_1
+  await assertFails(
+    bobDb.collection("communities").doc("comm_1").collection("members").doc("stranger_uid").set({
+      communityId: "comm_1",
+      uid: "stranger_uid",
+      displayName: "Stranger",
+      username: "stranger_one",
+      role: "MEMBER",
+      joinedAt: pastDate(800),
+    })
+  );
+  // Non-admin Bob cannot remove Charlie from comm_1
+  await assertFails(
+    bobDb.collection("communities").doc("comm_1").collection("members").doc(CHARLIE_UID).delete()
+  );
+  // Admin Alice cannot be removed by another admin even if promoted
+  await assertSucceeds(
+    aliceDb.collection("communities").doc("comm_1").update({
+      adminUids: [ALICE_UID, BOB_UID],
+      updatedAt: pastDate(700),
+    })
+  );
+  await assertFails(
+    bobDb.collection("communities").doc("comm_1").collection("members").doc(ALICE_UID).delete()
+  );
+  // Admin Alice removes Charlie from comm_1
+  await assertSucceeds(
+    aliceDb.collection("communities").doc("comm_1").collection("members").doc(CHARLIE_UID).delete()
+  );
 });
 
 test("Calls signaling: participant isolation & terminal status lock", async () => {

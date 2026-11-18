@@ -511,7 +511,9 @@ private fun WeConnectShell(
             community = openCommunity,
             viewModel = viewModel,
             myProfile = myProfile,
-            onBack = { openCommunityId = null }
+            onBack = { openCommunityId = null },
+            onOpenUserProfile = { inspectUserUid = it },
+            snackbarHostState = snackbarHostState
         )
     } else {
         if (activeTab != MainTab.HOME) {
