@@ -117,6 +117,42 @@ object MediaUtils {
                 null
             }
         }
+
+    suspend fun saveBase64ImageToGallery(context: Context, base64: String, fileNamePrefix: String = "WeConnect"): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val clean = base64.substringAfter("base64,", base64)
+                val bytes = Base64.decode(clean, Base64.DEFAULT)
+                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@withContext false
+
+                val filename = "${fileNamePrefix}_${System.currentTimeMillis()}.jpg"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val contentValues = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                        put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                        put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/WeConnect")
+                    }
+                    val resolver = context.contentResolver
+                    val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                        ?: return@withContext false
+                    resolver.openOutputStream(uri)?.use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                    } ?: return@withContext false
+                    true
+                } else {
+                    val picturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES)
+                    val dir = File(picturesDir, "WeConnect")
+                    if (!dir.exists()) dir.mkdirs()
+                    val file = File(dir, filename)
+                    FileOutputStream(file).use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                    }
+                    true
+                }
+            } catch (_: Exception) {
+                false
+            }
+        }
 }
 
 class VoiceNoteRecorder(private val context: Context) {

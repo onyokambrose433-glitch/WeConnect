@@ -42,7 +42,9 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
@@ -461,6 +463,12 @@ fun ChatThreadScreen(
                             scope.launch {
                                 viewModel.handleResult(viewModel.messagingRepo.deleteMessageForAll(chatId, msg.id))
                             }
+                        },
+                        onDownloadImage = { b64 ->
+                            scope.launch {
+                                val success = MediaUtils.saveBase64ImageToGallery(context, b64)
+                                viewModel.emitNotice(if (success) "Photo saved to Gallery!" else "Failed to save photo")
+                            }
                         }
                     )
                 }
@@ -712,7 +720,8 @@ private fun MessageBubble(
     onPin: () -> Unit,
     onForward: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onDownloadImage: (String) -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val isDark = isSystemInDarkTheme()
@@ -781,15 +790,37 @@ private fun MessageBubble(
                     if (!message.deletedForAll && message.messageType == "IMAGE" && !message.mediaBase64.isNullOrBlank()) {
                         val bmp = remember(message.mediaBase64) { MediaUtils.decodeBase64ToImageBitmap(message.mediaBase64) }
                         if (bmp != null) {
-                            Image(
-                                bitmap = bmp,
-                                contentDescription = "Shared photo",
-                                contentScale = ContentScale.Crop,
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(180.dp)
+                                    .height(190.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                            )
+                            ) {
+                                Image(
+                                    bitmap = bmp,
+                                    contentDescription = "Shared photo",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Surface(
+                                    onClick = { onDownloadImage(message.mediaBase64!!) },
+                                    shape = CircleShape,
+                                    color = Color.Black.copy(alpha = 0.6f),
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(8.dp)
+                                        .size(36.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.Download,
+                                            contentDescription = "Download Photo",
+                                            tint = PureWhite,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
                             Spacer(Modifier.height(6.dp))
                         }
                     }
