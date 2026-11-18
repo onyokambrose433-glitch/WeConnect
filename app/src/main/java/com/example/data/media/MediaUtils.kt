@@ -153,6 +153,51 @@ object MediaUtils {
                 false
             }
         }
+
+    suspend fun saveBase64FileToDownloads(
+        context: Context,
+        base64: String,
+        fileName: String,
+        mimeType: String? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val clean = base64.substringAfter("base64,", base64)
+            val bytes = Base64.decode(clean, Base64.DEFAULT)
+            val safeName = fileName.trim().ifBlank { "WeConnect_${System.currentTimeMillis()}.bin" }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, safeName)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mimeType ?: "application/octet-stream")
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS + "/WeConnect")
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: return@withContext false
+                resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return@withContext false
+                true
+            } else {
+                val dlDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                val dir = File(dlDir, "WeConnect")
+                if (!dir.exists()) dir.mkdirs()
+                val file = File(dir, safeName)
+                FileOutputStream(file).use { it.write(bytes) }
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun decodeFileToImageBitmap(filePath: String?): ImageBitmap? {
+        if (filePath.isNullOrBlank()) return null
+        return try {
+            val file = File(filePath)
+            if (!file.exists()) return null
+            BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
 
 class VoiceNoteRecorder(private val context: Context) {
