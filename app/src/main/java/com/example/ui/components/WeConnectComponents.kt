@@ -47,6 +47,7 @@ import com.example.data.media.MediaUtils
 import com.example.ui.theme.PureWhite
 import com.example.ui.theme.WhatsAppEmerald
 import com.example.ui.theme.WhatsAppGreen
+import com.example.ui.theme.WhatsAppOfflineGray
 import com.example.ui.theme.WhatsAppTeal
 import com.google.firebase.Timestamp
 import java.text.SimpleDateFormat
@@ -106,13 +107,14 @@ fun WeConnectAvatar(
                 )
             }
         }
-        if (showOnlineDot && isOnline) {
+        if (showOnlineDot) {
+            val dotColor = if (isOnline) WhatsAppGreen else WhatsAppOfflineGray
             Box(
                 modifier = Modifier
                     .size((size.value * 0.28f).dp.coerceAtLeast(10.dp))
                     .align(Alignment.BottomEnd)
                     .clip(CircleShape)
-                    .background(WhatsAppGreen)
+                    .background(dotColor)
                     .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
             )
         }
@@ -241,4 +243,25 @@ fun formatRelativeTime(ts: Timestamp?): String {
 fun formatTimeClock(ts: Timestamp?): String {
     if (ts == null) return ""
     return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts.seconds * 1000L))
+}
+
+fun formatLastSeenTime(ts: Timestamp?): String {
+    if (ts == null) return "recently"
+    val now = System.currentTimeMillis()
+    val time = ts.seconds * 1000L
+    val diffMs = (now - time).coerceAtLeast(0L)
+    val mins = diffMs / 60_000L
+    val calNow = java.util.Calendar.getInstance().apply { timeInMillis = now }
+    val calTarget = java.util.Calendar.getInstance().apply { timeInMillis = time }
+    val timeStr = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(time))
+
+    return when {
+        mins < 2 -> "just now"
+        mins < 60 -> "${mins}m ago"
+        calNow.get(java.util.Calendar.YEAR) == calTarget.get(java.util.Calendar.YEAR) &&
+            calNow.get(java.util.Calendar.DAY_OF_YEAR) == calTarget.get(java.util.Calendar.DAY_OF_YEAR) -> "today at $timeStr"
+        calNow.get(java.util.Calendar.YEAR) == calTarget.get(java.util.Calendar.YEAR) &&
+            calNow.get(java.util.Calendar.DAY_OF_YEAR) - calTarget.get(java.util.Calendar.DAY_OF_YEAR) == 1 -> "yesterday at $timeStr"
+        else -> SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault()).format(Date(time))
+    }
 }

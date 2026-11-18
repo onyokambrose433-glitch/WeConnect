@@ -321,6 +321,17 @@ test("Social Posts, Reactions, Comments, Stories & Communities", async () => {
       updatedAt: ts,
     })
   );
+  // Alice (owner) succeeds in creating her own ADMIN member record
+  await assertSucceeds(
+    aliceDb.collection("communities").doc("comm_1").collection("members").doc(ALICE_UID).set({
+      communityId: "comm_1",
+      uid: ALICE_UID,
+      displayName: "Alice Smith",
+      username: "alice_wonder",
+      role: "ADMIN",
+      joinedAt: pastDate(1000),
+    })
+  );
   await assertSucceeds(
     bobDb.collection("communities").doc("comm_1").collection("members").doc(BOB_UID).set({
       communityId: "comm_1",
@@ -342,6 +353,30 @@ test("Social Posts, Reactions, Comments, Stories & Communities", async () => {
       joinedAt: pastDate(1000),
     })
   );
+  // Batched community creation + admin member creation test
+  const batch = aliceDb.batch();
+  const comm2Ref = aliceDb.collection("communities").doc("comm_2");
+  batch.set(comm2Ref, {
+    name: "Tech Innovators",
+    description: "Future tech discussion",
+    kind: "CHANNEL",
+    visibility: "PUBLIC",
+    rulesText: "No spam.",
+    ownerId: ALICE_UID,
+    adminUids: [ALICE_UID],
+    memberCount: 1,
+    createdAt: ts,
+    updatedAt: ts,
+  });
+  batch.set(comm2Ref.collection("members").doc(ALICE_UID), {
+    communityId: "comm_2",
+    uid: ALICE_UID,
+    displayName: "Alice Smith",
+    username: "alice_wonder",
+    role: "ADMIN",
+    joinedAt: ts,
+  });
+  await assertSucceeds(batch.commit());
 });
 
 test("Calls signaling: participant isolation & terminal status lock", async () => {

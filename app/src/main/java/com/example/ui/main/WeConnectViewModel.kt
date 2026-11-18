@@ -28,8 +28,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class WeConnectViewModel(
@@ -88,6 +90,24 @@ class WeConnectViewModel(
             emit(UiState.Error(extractFirestoreMessage(error, "Failed to load conversations")))
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
+
+    private val _readChatTimestamps = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val readChatTimestamps: StateFlow<Map<String, Long>> = _readChatTimestamps.asStateFlow()
+
+    fun markChatAsRead(chatId: String, ts: Long = System.currentTimeMillis()) {
+        _readChatTimestamps.update { it + (chatId to ts) }
+    }
+
+    val unreadChatsCount: StateFlow<Int> = combine(conversationsState, _readChatTimestamps) { state, readMap ->
+        if (state is UiState.Success) {
+            state.data.count { conv ->
+                val sender = conv.lastMessageSenderId
+                val lastMsgTs = (conv.lastMessageAt?.seconds ?: 0L) * 1000L
+                val lastRead = readMap[conv.id] ?: 0L
+                sender != null && sender != currentUserId && lastMsgTs > lastRead
+            }
+        } else 0
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), 0)
 
     val publicPostsState: StateFlow<UiState<List<SocialPost>>> = socialRepo.observePublicPosts()
         .map<List<SocialPost>, UiState<List<SocialPost>>> { UiState.Success(it) }

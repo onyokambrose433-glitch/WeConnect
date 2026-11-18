@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -68,9 +69,13 @@ import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.WeConnectAvatar
 import com.example.ui.components.formatRelativeTime
 import com.example.ui.main.WeConnectViewModel
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import com.example.ui.theme.PureWhite
 import com.example.ui.theme.WhatsAppEmerald
 import com.example.ui.theme.WhatsAppGreen
+import com.example.ui.theme.WhatsAppOfflineGray
 import com.example.ui.theme.WhatsAppTeal
 import kotlinx.coroutines.launch
 
@@ -85,6 +90,7 @@ fun ChatsListScreen(
     val conversationsState by viewModel.conversationsState.collectAsStateWithLifecycle()
     val allProfilesState by viewModel.allProfilesState.collectAsStateWithLifecycle()
     val blockedUsers by viewModel.blockedUsers.collectAsStateWithLifecycle()
+    val readTimestamps by viewModel.readChatTimestamps.collectAsStateWithLifecycle()
 
     val blockedSet = remember(blockedUsers) { blockedUsers.map { it.blockedUid }.toSet() }
     val profilesMap = remember(allProfilesState) {
@@ -250,12 +256,24 @@ fun ChatsListScreen(
                                     val title = conversationDisplayName(conv, myProfile.uid, profilesMap)
                                     val isMuted = myProfile.uid in conv.mutedBy
 
+                                    val lastMsgTs = (conv.lastMessageAt?.seconds ?: 0L) * 1000L
+                                    val lastRead = readTimestamps[conv.id] ?: 0L
+                                    val hasNewMessage = conv.lastMessageSenderId != null && conv.lastMessageSenderId != myProfile.uid && lastMsgTs > lastRead
+
                                     Card(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { onOpenChat(conv.id) },
-                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                            .clickable {
+                                                viewModel.markChatAsRead(conv.id)
+                                                onOpenChat(conv.id)
+                                            },
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (hasNewMessage) WhatsAppGreen.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface
+                                        ),
+                                        border = BorderStroke(
+                                            width = if (hasNewMessage) 1.5.dp else 1.dp,
+                                            color = if (hasNewMessage) WhatsAppGreen else MaterialTheme.colorScheme.outline
+                                        )
                                     ) {
                                         Row(
                                             modifier = Modifier
@@ -292,6 +310,7 @@ fun ChatsListScreen(
                                                     Text(
                                                         text = title,
                                                         style = MaterialTheme.typography.titleMedium,
+                                                        fontWeight = if (hasNewMessage) FontWeight.Bold else FontWeight.SemiBold,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis,
                                                         modifier = Modifier.weight(1f, fill = false)
@@ -313,21 +332,66 @@ fun ChatsListScreen(
                                                         )
                                                     }
                                                 }
-                                                Spacer(Modifier.height(2.dp))
-                                                Text(
-                                                    text = conv.lastMessageText ?: "Tap to start messaging",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
+                                                Spacer(Modifier.height(3.dp))
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    if (hasNewMessage) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(8.dp)
+                                                                .clip(CircleShape)
+                                                                .background(WhatsAppGreen)
+                                                        )
+                                                        Spacer(Modifier.width(6.dp))
+                                                    }
+                                                    Text(
+                                                        text = conv.lastMessageText ?: "Tap to start messaging",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = if (hasNewMessage) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        fontWeight = if (hasNewMessage) FontWeight.Bold else FontWeight.Normal,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
                                             }
                                             Spacer(Modifier.width(8.dp))
-                                            Text(
-                                                text = formatRelativeTime(conv.lastMessageAt ?: conv.updatedAt),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text(
+                                                    text = formatRelativeTime(conv.lastMessageAt ?: conv.updatedAt),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (hasNewMessage) WhatsAppEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    fontWeight = if (hasNewMessage) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                                Spacer(Modifier.height(4.dp))
+                                                if (hasNewMessage) {
+                                                    Surface(
+                                                        color = WhatsAppGreen,
+                                                        shape = RoundedCornerShape(10.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "NEW",
+                                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                                            color = PureWhite,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                } else if (peerProfile != null && peerProfile.onlineStatusVisible) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(6.dp)
+                                                                .clip(CircleShape)
+                                                                .background(if (peerProfile.online) WhatsAppGreen else WhatsAppOfflineGray)
+                                                        )
+                                                        Spacer(Modifier.width(4.dp))
+                                                        Text(
+                                                            text = if (peerProfile.online) "online" else "offline",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = if (peerProfile.online) WhatsAppEmerald else WhatsAppOfflineGray,
+                                                            fontWeight = if (peerProfile.online) FontWeight.SemiBold else FontWeight.Normal
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }

@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -69,13 +70,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.media.MediaUtils
 import com.example.data.model.PublicProfile
 import com.example.data.model.UiState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import com.example.ui.components.ReportDialog
 import com.example.ui.components.WeConnectAvatar
+import com.example.ui.components.formatLastSeenTime
 import com.example.ui.components.formatRelativeTime
 import com.example.ui.main.WeConnectViewModel
 import com.example.ui.theme.PureWhite
 import com.example.ui.theme.WhatsAppCallRed
 import com.example.ui.theme.WhatsAppEmerald
+import com.example.ui.theme.WhatsAppGreen
+import com.example.ui.theme.WhatsAppOfflineGray
 import com.example.ui.theme.WhatsAppTeal
 import kotlinx.coroutines.launch
 
@@ -578,11 +584,28 @@ fun UserPublicProfileDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                WeConnectAvatar(target.displayName, target.avatarBase64, size = 50.dp, showOnlineDot = target.onlineStatusVisible, isOnline = target.online)
+                WeConnectAvatar(target.displayName, target.avatarBase64, size = 52.dp, showOnlineDot = target.onlineStatusVisible, isOnline = target.online)
                 Spacer(Modifier.width(12.dp))
                 Column {
-                    Text(target.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text(target.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text("@${target.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    if (target.onlineStatusVisible) {
+                        Spacer(Modifier.height(3.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(if (target.online) WhatsAppGreen else WhatsAppOfflineGray)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = if (target.online) "Online" else "Last seen ${formatLastSeenTime(target.lastSeenAt)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (target.online) WhatsAppEmerald else WhatsAppOfflineGray
+                            )
+                        }
+                    }
                 }
             }
         },

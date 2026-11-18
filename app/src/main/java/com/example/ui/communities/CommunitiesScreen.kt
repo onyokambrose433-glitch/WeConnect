@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -103,21 +104,29 @@ fun CommunitiesScreen(
                     .widthIn(max = 680.dp)
                     .fillMaxSize()
             ) {
-                Row(
+                LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("ALL" to "All", "COMMUNITY" to "Communities", "CHANNEL" to "Channels").forEach { (key, label) ->
+                    items(listOf("ALL" to "All", "COMMUNITY" to "Communities", "CHANNEL" to "Channels")) { (key, label) ->
                         FilterChip(
                             selected = kindFilter == key,
                             onClick = { kindFilter = key },
-                            label = { Text(label) },
+                            label = { Text(label, maxLines = 1, style = MaterialTheme.typography.labelMedium) },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
+                                selectedContainerColor = WhatsAppEmerald,
+                                selectedLabelColor = PureWhite,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                labelColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = kindFilter == key,
+                                borderColor = if (kindFilter == key) WhatsAppEmerald else MaterialTheme.colorScheme.outline
+                            ),
+                            shape = RoundedCornerShape(20.dp)
                         )
                     }
                 }

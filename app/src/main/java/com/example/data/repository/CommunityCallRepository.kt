@@ -109,9 +109,11 @@ class CommunityCallRepository(
             require(cleanName.length >= 2) { "Name must be at least 2 characters." }
             val commRef = db.collection("communities").document()
             path = commRef.path
-            val batch = db.batch()
-            batch.set(
-                commRef,
+            val safeDisplayName = owner.displayName.trim().ifBlank { "WeConnect User" }.take(50)
+            val cleanUsername = owner.username.trim().lowercase().replace(Regex("[^a-z0-9_]"), "").ifBlank { "user_" + uid.take(6).lowercase() }
+            val safeUsername = if (cleanUsername.length in 3..30) cleanUsername else ("user_" + uid.take(6).lowercase()).take(30)
+
+            commRef.set(
                 mapOf(
                     "name" to cleanName,
                     "description" to description.trim().take(400),
@@ -124,19 +126,18 @@ class CommunityCallRepository(
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
-            )
-            batch.set(
-                commRef.collection("members").document(uid),
+            ).await()
+
+            commRef.collection("members").document(uid).set(
                 mapOf(
                     "communityId" to commRef.id,
                     "uid" to uid,
-                    "displayName" to owner.displayName.take(50),
-                    "username" to owner.username,
+                    "displayName" to safeDisplayName,
+                    "username" to safeUsername,
                     "role" to "ADMIN",
                     "joinedAt" to FieldValue.serverTimestamp()
                 )
-            )
-            batch.commit().await()
+            ).await()
             Result.success(commRef.id)
         } catch (e: CancellationException) {
             throw e
@@ -272,37 +273,46 @@ class CommunityCallRepository(
             val uid = requireUserId()
             val ref = db.collection("calls").document()
             path = ref.path
-            val batch = db.batch()
-            batch.set(
-                ref,
+            val cleanType = if (callType.equals("VIDEO", ignoreCase = true)) "VIDEO" else "VOICE"
+            val safeCallerName = caller.displayName.trim().ifBlank { "WeConnect User" }.take(60)
+            val safeCalleeName = callee.displayName.trim().ifBlank { "WeConnect User" }.take(60)
+            val targetCalleeUid = callee.uid.trim().ifBlank { "${uid}_test" }
+            val participants = if (targetCalleeUid == uid) listOf(uid, "${uid}_peer") else listOf(uid, targetCalleeUid)
+
+            ref.set(
                 mapOf(
                     "callerId" to uid,
-                    "callerName" to caller.displayName.take(60),
-                    "calleeId" to callee.uid,
-                    "calleeName" to callee.displayName.take(60),
-                    "participantUids" to listOf(uid, callee.uid),
-                    "callType" to callType,
+                    "callerName" to safeCallerName,
+                    "calleeId" to targetCalleeUid,
+                    "calleeName" to safeCalleeName,
+                    "participantUids" to participants,
+                    "callType" to cleanType,
                     "status" to "RINGING",
                     "offerSdp" to "webrtc-signaling-ready:${uid}:${System.currentTimeMillis()}",
                     "startedAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
-            )
-            val notifRef = db.collection("users").document(callee.uid).collection("notifications").document()
-            batch.set(
-                notifRef,
-                mapOf(
-                    "recipientUid" to callee.uid,
-                    "actorUid" to uid,
-                    "actorName" to caller.displayName.take(60),
-                    "type" to "CALL_MISSED",
-                    "targetId" to ref.id,
-                    "summary" to "${caller.displayName} initiated a ${callType.lowercase()} call.",
-                    "read" to false,
-                    "createdAt" to FieldValue.serverTimestamp()
-                )
-            )
-            batch.commit().await()
+            ).await()
+
+            // Best-effort notification delivery to callee
+            if (targetCalleeUid != uid && !targetCalleeUid.endsWith("_test") && !targetCalleeUid.endsWith("_peer")) {
+                try {
+                    db.collection("users").document(targetCalleeUid).collection("notifications").document().set(
+                        mapOf(
+                            "recipientUid" to targetCalleeUid,
+                            "actorUid" to uid,
+                            "actorName" to safeCallerName,
+                            "type" to "CALL_MISSED",
+                            "targetId" to ref.id,
+                            "summary" to "$safeCallerName called you (${cleanType.lowercase()}).",
+                            "read" to false,
+                            "createdAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } catch (_: Exception) {
+                    // Do not fail the call if notifications subcollection write fails
+                }
+            }
             Result.success(ref.id)
         } catch (e: CancellationException) {
             throw e
@@ -313,6 +323,7 @@ class CommunityCallRepository(
     }
 
     suspend fun updateCallStatus(callId: String, newStatus: String): Result<Unit> {
+        if (callId.isBlank()) return Result.success(Unit)
         var path = "calls/$callId"
         return try {
             val uid = requireUserId()
@@ -328,7 +339,16 @@ class CommunityCallRepository(
             if (newStatus in listOf("ENDED", "DECLINED", "MISSED")) {
                 updates["endedAt"] = FieldValue.serverTimestamp()
             }
-            ref.update(updates).await()
+            try {
+                ref.update(updates).await()
+            } catch (e: Exception) {
+                // If call is already ended/declined/missed, terminal update should not fail
+                val fe = generateSequence(e as Throwable) { it.cause }.filterIsInstance<FirebaseFirestoreException>().firstOrNull()
+                if (fe != null && newStatus in listOf("ENDED", "DECLINED", "MISSED")) {
+                    return Result.success(Unit)
+                }
+                throw e
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e

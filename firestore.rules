@@ -563,7 +563,9 @@ service cloud.firestore {
                          incoming().displayName is string && incoming().displayName.size() >= 1 && incoming().displayName.size() <= 50 &&
                          isValidUsername(incoming().username) &&
                          incoming().role in ['ADMIN', 'MODERATOR', 'MEMBER'] &&
-                         (incoming().role == 'MEMBER' || get(/databases/$(database)/documents/communities/$(communityId)).data.ownerId == request.auth.uid) &&
+                         (incoming().role == 'MEMBER' ||
+                          (existsAfter(/databases/$(database)/documents/communities/$(communityId)) && getAfter(/databases/$(database)/documents/communities/$(communityId)).data.ownerId == request.auth.uid) ||
+                          (exists(/databases/$(database)/documents/communities/$(communityId)) && get(/databases/$(database)/documents/communities/$(communityId)).data.ownerId == request.auth.uid)) &&
                          isPastOrNowTs(incoming().joinedAt) &&
                          incoming().keys().hasAll(['communityId', 'uid', 'displayName', 'username', 'role', 'joinedAt']) &&
                          incoming().keys().hasOnly(['communityId', 'uid', 'displayName', 'username', 'role', 'joinedAt']);

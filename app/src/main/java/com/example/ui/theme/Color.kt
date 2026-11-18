@@ -24,6 +24,7 @@ val WhatsAppMutedGray = Color(0xFF54656F)
 val WhatsAppReadBlue = Color(0xFF53BDEB)
 val WhatsAppCallRed = Color(0xFFEA0038)
 val WhatsAppErrorBgLight = Color(0xFFFDECEF)
+val WhatsAppOfflineGray = Color(0xFF9E9E9E)
 
 // WhatsApp Dark Mode Surfaces & Text
 val WhatsAppDarkBg = Color(0xFF0B141A)

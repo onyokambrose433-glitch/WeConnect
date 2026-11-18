@@ -98,6 +98,7 @@ import com.example.data.model.PublicProfile
 import com.example.data.model.UiState
 import com.example.ui.components.GeminiChatAssistSheet
 import com.example.ui.components.WeConnectAvatar
+import com.example.ui.components.formatLastSeenTime
 import com.example.ui.components.formatTimeClock
 import com.example.ui.main.AiViewModel
 import com.example.ui.main.WeConnectViewModel
@@ -113,6 +114,7 @@ import com.example.ui.theme.WhatsAppDarkText
 import com.example.ui.theme.WhatsAppEmerald
 import com.example.ui.theme.WhatsAppGreen
 import com.example.ui.theme.WhatsAppInkDark
+import com.example.ui.theme.WhatsAppOfflineGray
 import com.example.ui.theme.WhatsAppOutgoingBubbleLight
 import com.example.ui.theme.WhatsAppReadBlue
 import com.example.ui.theme.WhatsAppTeal
@@ -153,7 +155,18 @@ fun ChatThreadScreen(
 
     val conv = conversation
     val peerUid = conv?.memberUids?.firstOrNull { it != myProfile.uid }
-    val peerProfile = peerUid?.let { profilesMap[it] }
+    val peerProfile = remember(peerUid, profilesMap, conv) {
+        val found = peerUid?.let { profilesMap[it] }
+        if (found != null) found
+        else if (peerUid != null) {
+            val name = conv?.memberNames?.get(peerUid)?.ifBlank { "User" } ?: "WeConnect User"
+            PublicProfile(
+                uid = peerUid,
+                displayName = name,
+                username = "user_${peerUid.take(6).lowercase()}"
+            )
+        } else null
+    }
 
     var inputText by remember { mutableStateOf("") }
     var replyTarget by remember { mutableStateOf<Pair<ChatMessage, String>?>(null) }
@@ -291,17 +304,30 @@ fun ChatThreadScreen(
                                     Icon(Icons.Default.Lock, contentDescription = "Encrypted", tint = WhatsAppGreen, modifier = Modifier.size(14.dp))
                                 }
                             }
+                            val isOnline = peerProfile?.online == true && (peerProfile.onlineStatusVisible)
                             val subtitle = when {
                                 typingList.isNotEmpty() -> "${typingList.first().displayName} is typing…"
                                 conv?.type == "GROUP" -> "${conv.memberUids.size} members"
-                                peerProfile?.online == true && peerProfile.onlineStatusVisible -> "online"
+                                isOnline -> "online"
+                                peerProfile != null && peerProfile.onlineStatusVisible -> "last seen ${formatLastSeenTime(peerProfile.lastSeenAt)}"
                                 else -> "end-to-end encrypted"
                             }
-                            Text(
-                                text = subtitle,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (typingList.isNotEmpty() || (peerProfile?.online == true && peerProfile.onlineStatusVisible)) WhatsAppEmerald else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (conv?.type == "DIRECT" && peerProfile != null && peerProfile.onlineStatusVisible && typingList.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isOnline) WhatsAppGreen else WhatsAppOfflineGray)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                Text(
+                                    text = subtitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (typingList.isNotEmpty() || isOnline) WhatsAppEmerald else WhatsAppOfflineGray
+                                )
+                            }
                         }
                     }
                 },
@@ -818,10 +844,12 @@ private fun MessageBubble(
                         if (isMine) {
                             val isRead = message.readBy.size > 1
                             val isDelivered = message.deliveredTo.size > 1
+                            val tickIcon = if (isRead || isDelivered) Icons.Default.DoneAll else Icons.Default.Done
+                            val tickTint = if (isRead) WhatsAppReadBlue else metaColor
                             Icon(
-                                imageVector = if (isRead || isDelivered) Icons.Default.DoneAll else Icons.Default.Done,
-                                contentDescription = "Delivery status",
-                                tint = if (isRead) WhatsAppReadBlue else metaColor,
+                                imageVector = tickIcon,
+                                contentDescription = if (isRead) "Read (blue ticks)" else if (isDelivered) "Delivered (double ticks)" else "Sent (single tick)",
+                                tint = tickTint,
                                 modifier = Modifier.size(15.dp)
                             )
                         }

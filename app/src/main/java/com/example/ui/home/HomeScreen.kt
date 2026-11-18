@@ -180,16 +180,27 @@ fun HomeScreen(
                             .padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("ALL" to "For You", "FOLLOWING" to "Following", "SAVED" to "Saved").forEach { (key, label) ->
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(horizontal = 0.dp)
+                        ) {
+                            items(listOf("ALL" to "For You", "FOLLOWING" to "Following", "SAVED" to "Saved")) { (key, label) ->
                                 FilterChip(
                                     selected = selectedTab == key,
                                     onClick = { selectedTab = key },
-                                    label = { Text(label) },
+                                    label = { Text(label, maxLines = 1, style = MaterialTheme.typography.labelMedium) },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
+                                        selectedContainerColor = WhatsAppEmerald,
+                                        selectedLabelColor = PureWhite,
+                                        containerColor = MaterialTheme.colorScheme.surface,
+                                        labelColor = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = selectedTab == key,
+                                        borderColor = if (selectedTab == key) WhatsAppEmerald else MaterialTheme.colorScheme.outline
+                                    ),
+                                    shape = RoundedCornerShape(20.dp)
                                 )
                             }
                         }
@@ -639,46 +650,107 @@ private fun PostCard(
             Spacer(Modifier.height(4.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onLikeClick) {
-                        Icon(
-                            imageVector = if (myReaction != null) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = "React",
-                            tint = if (myReaction != null) WhatsAppEmerald else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        onClick = onLikeClick,
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (myReaction != null) WhatsAppEmerald.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (myReaction != null) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = "React",
+                                tint = if (myReaction != null) WhatsAppEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            if (post.likesCount > 0) {
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = "${post.likesCount}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (myReaction != null) WhatsAppEmerald else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
-                    Text("${post.likesCount}", style = MaterialTheme.typography.labelMedium)
 
-                    Spacer(Modifier.width(10.dp))
-                    IconButton(onClick = onCommentClick) {
-                        Icon(
-                            imageVector = Icons.Default.ChatBubbleOutline,
-                            contentDescription = "Comments",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Surface(
+                        onClick = onCommentClick,
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChatBubbleOutline,
+                                contentDescription = "Comments",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            if (post.commentsCount > 0) {
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = "${post.commentsCount}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
-                    Text("${post.commentsCount}", style = MaterialTheme.typography.labelMedium)
 
-                    Spacer(Modifier.width(10.dp))
-                    IconButton(onClick = onShareClick) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "Share",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Surface(
+                        onClick = onShareClick,
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Share",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            if (post.sharesCount > 0) {
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = "${post.sharesCount}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
-                    Text("${post.sharesCount}", style = MaterialTheme.typography.labelMedium)
                 }
 
-                IconButton(onClick = onSaveClick) {
+                IconButton(
+                    onClick = onSaveClick,
+                    modifier = Modifier.size(36.dp)
+                ) {
                     Icon(
                         imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                         contentDescription = "Save Post",
-                        tint = if (isSaved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = if (isSaved) WhatsAppEmerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

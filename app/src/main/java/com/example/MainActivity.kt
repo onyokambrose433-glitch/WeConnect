@@ -3,8 +3,10 @@ package com.example
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -32,10 +34,14 @@ import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import com.example.ui.theme.WhatsAppGreen
+import com.example.ui.theme.WhatsAppOfflineGray
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -68,16 +74,24 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.data.crypto.WeConnectCrypto
 import com.example.data.model.Community
+import com.example.data.model.Conversation
 import com.example.data.model.PublicProfile
 import com.example.data.model.UiState
+import com.example.data.notification.WeConnectNotifier
 import com.example.data.remote.configureAppCheck
 import com.example.data.repository.AuthProfileRepository
 import com.example.data.repository.CommunityCallRepository
@@ -144,7 +158,7 @@ private enum class MainTab(
 ) {
     HOME("Home", Icons.Filled.Home, Icons.Outlined.Home, "nav_home"),
     CHATS("Chats", Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat, "nav_chats"),
-    COMMUNITIES("Communities", Icons.Filled.Groups, Icons.Outlined.Groups, "nav_communities"),
+    COMMUNITIES("Community", Icons.Filled.Groups, Icons.Outlined.Groups, "nav_communities"),
     CALLS("Calls", Icons.Filled.Call, Icons.Outlined.Call, "nav_calls"),
     PROFILE("Profile", Icons.Filled.Person, Icons.Outlined.Person, "nav_profile")
 }
@@ -205,9 +219,52 @@ private fun AuthenticatedRoot(
         )
     }
 
-    DisposableEffect(currentUserId) {
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    val notifications by viewModel.notifications.collectAsStateWithLifecycle()
+    var lastNotifId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(notifications) {
+        val latest = notifications.firstOrNull { !it.read }
+        if (latest != null && latest.id != lastNotifId) {
+            lastNotifId = latest.id
+            WeConnectNotifier.showNotification(context, latest.actorName.ifBlank { "WeConnect" }, latest.summary)
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, currentUserId) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    scope.launch { viewModel.authRepo.setOnlineStatus(true) }
+                }
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    scope.launch { viewModel.authRepo.setOnlineStatus(false) }
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         scope.launch { viewModel.authRepo.setOnlineStatus(true) }
-        onDispose { }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            scope.launch { viewModel.authRepo.setOnlineStatus(false) }
+        }
+    }
+
+    LaunchedEffect(currentUserId) {
+        while (isActive) {
+            delay(50_000)
+            viewModel.authRepo.setOnlineStatus(true)
+        }
     }
 
     when (val state = myProfileState) {
@@ -303,6 +360,36 @@ private fun WeConnectShell(
     var inspectUserUid by rememberSaveable { mutableStateOf<String?>(null) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var showGeminiDialog by remember { mutableStateOf(false) }
+
+    val unreadChatsCount by viewModel.unreadChatsCount.collectAsStateWithLifecycle()
+    val conversationsState by viewModel.conversationsState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(openChatId) {
+        openChatId?.let { viewModel.markChatAsRead(it) }
+    }
+
+    var knownLastMessages by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(conversationsState) {
+        val state = conversationsState
+        if (state is UiState.Success<List<Conversation>>) {
+            val list = state.data
+            list.forEach { conv ->
+                val prevMsg = knownLastMessages[conv.id]
+                val currentMsg = conv.lastMessageText
+                if (prevMsg != null && currentMsg != null && prevMsg != currentMsg &&
+                    conv.lastMessageSenderId != null && conv.lastMessageSenderId != myProfile.uid &&
+                    openChatId != conv.id
+                ) {
+                    val senderName = conv.memberNames[conv.lastMessageSenderId] ?: "Someone"
+                    scope.launch {
+                        snackbarHostState.showSnackbar("💬 $senderName: $currentMsg")
+                    }
+                }
+            }
+            knownLastMessages = list.filter { it.lastMessageText != null }
+                .associate { it.id to (it.lastMessageText ?: "") }
+        }
+    }
 
     val communitiesState by viewModel.communitiesState.collectAsStateWithLifecycle()
     val openCommunity: Community? = remember(openCommunityId, communitiesState) {
@@ -423,12 +510,30 @@ private fun WeConnectShell(
                                     selected = selected,
                                     onClick = { activeTab = tab },
                                     icon = {
-                                        Icon(
-                                            imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                            contentDescription = tab.label
-                                        )
+                                        if (tab == MainTab.CHATS && unreadChatsCount > 0) {
+                                            BadgedBox(
+                                                badge = {
+                                                    Badge(
+                                                        containerColor = WhatsAppGreen,
+                                                        contentColor = PureWhite
+                                                    ) {
+                                                        Text("$unreadChatsCount")
+                                                    }
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                                                    contentDescription = tab.label
+                                                )
+                                            }
+                                        } else {
+                                            Icon(
+                                                imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                                                contentDescription = tab.label
+                                            )
+                                        }
                                     },
-                                    label = { Text(tab.label, maxLines = 1) },
+                                    label = { Text(tab.label, maxLines = 1, style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp)) },
                                     colors = NavigationBarItemDefaults.colors(
                                         selectedIconColor = MaterialTheme.colorScheme.primary,
                                         selectedTextColor = MaterialTheme.colorScheme.onSurface,
@@ -459,10 +564,28 @@ private fun WeConnectShell(
                                     selected = selected,
                                     onClick = { activeTab = tab },
                                     icon = {
-                                        Icon(
-                                            imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                            contentDescription = tab.label
-                                        )
+                                        if (tab == MainTab.CHATS && unreadChatsCount > 0) {
+                                            BadgedBox(
+                                                badge = {
+                                                    Badge(
+                                                        containerColor = WhatsAppGreen,
+                                                        contentColor = PureWhite
+                                                    ) {
+                                                        Text("$unreadChatsCount")
+                                                    }
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                                                    contentDescription = tab.label
+                                                )
+                                            }
+                                        } else {
+                                            Icon(
+                                                imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                                                contentDescription = tab.label
+                                            )
+                                        }
                                     },
                                     label = { Text(tab.label) },
                                     colors = NavigationRailItemDefaults.colors(
