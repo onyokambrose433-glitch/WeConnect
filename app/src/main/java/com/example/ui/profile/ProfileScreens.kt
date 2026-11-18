@@ -16,24 +16,34 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Search
@@ -56,6 +66,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -68,7 +79,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.media.MediaUtils
 import com.example.data.model.PublicProfile
@@ -80,6 +95,7 @@ import com.example.ui.components.ReportDialog
 import com.example.ui.components.WeConnectAvatar
 import com.example.ui.components.formatLastSeenTime
 import com.example.ui.components.formatRelativeTime
+import com.example.ui.main.SearchHistoryKind
 import com.example.ui.main.WeConnectViewModel
 import com.example.ui.theme.PureWhite
 import com.example.ui.theme.WhatsAppCallRed
@@ -843,123 +859,597 @@ fun GlobalSearchDialog(
 ) {
     var query by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    val profiles = (viewModel.allProfilesState.collectAsStateWithLifecycle().value as? UiState.Success)?.data ?: emptyList()
-    val communities = (viewModel.communitiesState.collectAsStateWithLifecycle().value as? UiState.Success)?.data ?: emptyList()
-    val posts = (viewModel.publicPostsState.collectAsStateWithLifecycle().value as? UiState.Success)?.data ?: emptyList()
-    val myProfile = (viewModel.myProfileState.collectAsStateWithLifecycle().value as? UiState.Success)?.data
+    val allProfilesState by viewModel.allProfilesState.collectAsStateWithLifecycle()
+    val communitiesState by viewModel.communitiesState.collectAsStateWithLifecycle()
+    val postsState by viewModel.publicPostsState.collectAsStateWithLifecycle()
+    val myProfileState by viewModel.myProfileState.collectAsStateWithLifecycle()
+    val blockedUsers by viewModel.blockedUsers.collectAsStateWithLifecycle()
     val followingIds by viewModel.followingIds.collectAsStateWithLifecycle()
     val followerIds by viewModel.followerIds.collectAsStateWithLifecycle()
+    val searchHistory by viewModel.searchHistory.collectAsStateWithLifecycle()
+    val recentInteractedUsers by viewModel.recentInteractedUsers.collectAsStateWithLifecycle()
+    val recentInteractedCommunities by viewModel.recentInteractedCommunities.collectAsStateWithLifecycle()
     val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
 
+    val blockedSet = remember(blockedUsers) { blockedUsers.map { it.blockedUid }.toSet() }
+    val profiles = remember(allProfilesState, blockedSet) {
+        ((allProfilesState as? UiState.Success)?.data ?: emptyList())
+            .filter { it.uid != myUid && it.uid !in blockedSet }
+    }
+    val profileMap = remember(profiles) { profiles.associateBy { it.uid } }
+    val communities = (communitiesState as? UiState.Success)?.data ?: emptyList()
+    val communityMap = remember(communities) { communities.associateBy { it.id } }
+    val posts = (postsState as? UiState.Success)?.data ?: emptyList()
+    val myProfile = (myProfileState as? UiState.Success)?.data
+
+    val matchingHistory = remember(query, searchHistory) {
+        if (query.isBlank()) searchHistory
+        else searchHistory.filter {
+            it.title.contains(query, true) || it.subtitle.contains(query, true)
+        }
+    }
+
     val matchedUsers = remember(query, profiles) {
-        profiles.filter {
-            it.uid != myUid && (query.isBlank() || it.displayName.contains(query, true) || it.username.contains(query, true))
-        }.take(10)
+        if (query.isBlank()) emptyList()
+        else profiles.filter {
+            it.displayName.contains(query, true) || it.username.contains(query, true)
+        }.take(12)
     }
     val matchedCommunities = remember(query, communities) {
-        communities.filter {
-            query.isNotBlank() && (it.name.contains(query, true) || it.description.contains(query, true))
-        }.take(6)
+        if (query.isBlank()) emptyList()
+        else communities.filter {
+            it.name.contains(query, true) || it.description.contains(query, true)
+        }.take(8)
     }
     val matchedPosts = remember(query, posts) {
-        posts.filter {
-            query.isNotBlank() && (it.caption.contains(query, true) || it.hashtags.any { h -> h.contains(query.removePrefix("#"), true) })
+        if (query.isBlank()) emptyList()
+        else posts.filter {
+            it.caption.contains(query, true) ||
+                it.authorName.contains(query, true) ||
+                it.hashtags.any { h -> h.contains(query.removePrefix("#"), true) }
         }.take(6)
     }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("Search WeConnect") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("Search users, @handles, #tags, communities…") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                LazyColumn(modifier = Modifier.height(260.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (matchedUsers.isNotEmpty()) {
-                        item { Text("People", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) }
-                        items(matchedUsers, key = { "u_${it.uid}" }) { user ->
-                            val isFollowing = user.uid in followingIds
-                            val followsMe = user.uid in followerIds
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onDismiss(); onSelectUser(user.uid) }
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                WeConnectAvatar(
-                                    displayName = user.displayName,
-                                    avatarBase64 = user.avatarBase64,
-                                    size = 34.dp,
-                                    showOnlineDot = user.onlineStatusVisible,
-                                    isOnline = user.isEffectivelyOnline(nowMs)
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(user.displayName, style = MaterialTheme.typography.titleSmall)
-                                    Text("@${user.username}", style = MaterialTheme.typography.bodySmall)
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+            shadowElevation = 10.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 24.dp)
+                .widthIn(max = 620.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search")
+                    }
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it.take(80) },
+                        placeholder = { Text("Search people, @handles, communities, #tags…") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = WhatsAppTeal) },
+                        trailingIcon = {
+                            if (query.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { query = "" },
+                                    modifier = Modifier.testTag("global_search_clear")
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear search")
                                 }
-                                if (myProfile != null) {
-                                    Surface(
-                                        onClick = {
-                                            scope.launch {
-                                                viewModel.handleResult(
-                                                    viewModel.authRepo.toggleFollow(myProfile, user, isFollowing),
-                                                    if (isFollowing) "Unfollowed @${user.username}" else "Following @${user.username}"
-                                                )
-                                            }
-                                        },
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = if (isFollowing) MaterialTheme.colorScheme.secondaryContainer else WhatsAppEmerald.copy(alpha = 0.14f)
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(24.dp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = {
+                                if (query.isNotBlank()) viewModel.recordQuerySearch(query)
+                            }
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("global_search_input")
+                    )
+                }
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 260.dp, max = 460.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 6.dp)
+                ) {
+                    if (query.isBlank()) {
+                        if (searchHistory.isNotEmpty()) {
+                            item(key = "history_header") {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Recent searches",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    TextButton(
+                                        onClick = { viewModel.clearSearchHistory() },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        modifier = Modifier.testTag("clear_search_history_button")
                                     ) {
+                                        Text("Clear all", style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+
+                            items(searchHistory.take(8), key = { "hist_${it.id}" }) { entry ->
+                                val linkedProfile = if (entry.kind == SearchHistoryKind.USER) profileMap[entry.targetId] else null
+                                val linkedCommunity = if (entry.kind == SearchHistoryKind.COMMUNITY) communityMap[entry.targetId] else null
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            when (entry.kind) {
+                                                SearchHistoryKind.QUERY -> {
+                                                    query = entry.targetId
+                                                    viewModel.recordQuerySearch(entry.targetId)
+                                                }
+                                                SearchHistoryKind.USER -> {
+                                                    linkedProfile?.let { viewModel.recordUserInteractionSearch(it) }
+                                                    onDismiss()
+                                                    onSelectUser(entry.targetId)
+                                                }
+                                                SearchHistoryKind.COMMUNITY -> {
+                                                    if (linkedCommunity != null) {
+                                                        viewModel.recordCommunityInteractionSearch(linkedCommunity)
+                                                        onDismiss()
+                                                        onSelectCommunity(linkedCommunity)
+                                                    } else {
+                                                        query = entry.title
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    when (entry.kind) {
+                                        SearchHistoryKind.USER -> {
+                                            WeConnectAvatar(
+                                                displayName = linkedProfile?.displayName ?: entry.title,
+                                                avatarBase64 = linkedProfile?.avatarBase64,
+                                                size = 34.dp,
+                                                showOnlineDot = linkedProfile?.onlineStatusVisible == true,
+                                                isOnline = linkedProfile?.isEffectivelyOnline(nowMs) == true
+                                            )
+                                        }
+                                        SearchHistoryKind.COMMUNITY -> {
+                                            Surface(
+                                                color = WhatsAppTeal.copy(alpha = 0.14f),
+                                                shape = CircleShape,
+                                                modifier = Modifier.size(34.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = if (linkedCommunity?.kind == "CHANNEL") Icons.Default.Campaign else Icons.Default.Groups,
+                                                        contentDescription = null,
+                                                        tint = WhatsAppTeal,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        SearchHistoryKind.QUERY -> {
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                                shape = CircleShape,
+                                                modifier = Modifier.size(34.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        Icons.Default.History,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = if (isFollowing) "Following" else if (followsMe) "Follow Back" else "Follow",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (isFollowing) MaterialTheme.colorScheme.onSecondaryContainer else WhatsAppEmerald,
-                                            fontWeight = FontWeight.SemiBold,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            text = entry.title,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (entry.subtitle.isNotBlank()) {
+                                            Text(
+                                                text = entry.subtitle,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    if (entry.kind == SearchHistoryKind.QUERY) {
+                                        Icon(
+                                            Icons.Default.NorthWest,
+                                            contentDescription = "Use search query",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.removeSearchHistoryItem(entry.id) },
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .testTag("remove_search_history_${entry.id}")
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove from history",
+                                            tint = WhatsAppOfflineGray,
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
                                 }
                             }
                         }
-                    }
-                    if (matchedCommunities.isNotEmpty()) {
-                        item { Text("Communities & Channels", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) }
-                        items(matchedCommunities, key = { "c_${it.id}" }) { comm ->
-                            Text(
-                                text = "${comm.name} (${comm.memberCount} members)",
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onDismiss(); onSelectCommunity(comm) }
-                                    .padding(vertical = 4.dp)
-                            )
+
+                        if (recentInteractedUsers.isNotEmpty()) {
+                            item(key = "recent_users_header") {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "Recent people you interacted with",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            item(key = "recent_users_carousel") {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    contentPadding = PaddingValues(vertical = 4.dp)
+                                ) {
+                                    items(recentInteractedUsers, key = { "rec_u_${it.uid}" }) { user ->
+                                        val isOnline = user.isEffectivelyOnline(nowMs)
+                                        Surface(
+                                            onClick = {
+                                                viewModel.recordUserInteractionSearch(user)
+                                                onDismiss()
+                                                onSelectUser(user.uid)
+                                            },
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                modifier = Modifier
+                                                    .width(86.dp)
+                                                    .padding(horizontal = 8.dp, vertical = 10.dp)
+                                            ) {
+                                                WeConnectAvatar(
+                                                    displayName = user.displayName,
+                                                    avatarBase64 = user.avatarBase64,
+                                                    size = 44.dp,
+                                                    showOnlineDot = user.onlineStatusVisible,
+                                                    isOnline = isOnline
+                                                )
+                                                Spacer(Modifier.height(6.dp))
+                                                Text(
+                                                    text = user.displayName,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "@${user.username}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    }
-                    if (matchedPosts.isNotEmpty()) {
-                        item { Text("Posts", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) }
-                        items(matchedPosts, key = { "p_${it.id}" }) { post ->
-                            Text(
-                                text = "@${post.authorUsername}: ${post.caption.take(80)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onDismiss(); onSelectUser(post.authorId) }
-                                    .padding(vertical = 4.dp)
-                            )
+
+                        if (recentInteractedCommunities.isNotEmpty()) {
+                            item(key = "recent_comms_header") {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "Recent & suggested communities",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            items(recentInteractedCommunities, key = { "rec_c_${it.id}" }) { comm ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            viewModel.recordCommunityInteractionSearch(comm)
+                                            onDismiss()
+                                            onSelectCommunity(comm)
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        color = WhatsAppTeal,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.size(38.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = if (comm.kind == "CHANNEL") Icons.Default.Campaign else Icons.Default.Groups,
+                                                contentDescription = null,
+                                                tint = PureWhite,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = comm.name,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${if (comm.kind == "CHANNEL") "Channel" else "Community"} · ${comm.memberCount} member(s)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (searchHistory.isEmpty() && recentInteractedUsers.isEmpty() && recentInteractedCommunities.isEmpty()) {
+                            item(key = "empty_history") {
+                                Text(
+                                    text = "Search for people, communities, or hashtags — your recent searches and interactions will appear here.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 24.dp, horizontal = 8.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        if (matchingHistory.isNotEmpty()) {
+                            item(key = "matching_hist_header") {
+                                Text(
+                                    text = "From search history",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            items(matchingHistory.take(3), key = { "m_hist_${it.id}" }) { entry ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            when (entry.kind) {
+                                                SearchHistoryKind.QUERY -> query = entry.targetId
+                                                SearchHistoryKind.USER -> {
+                                                    profileMap[entry.targetId]?.let { viewModel.recordUserInteractionSearch(it) }
+                                                    onDismiss()
+                                                    onSelectUser(entry.targetId)
+                                                }
+                                                SearchHistoryKind.COMMUNITY -> {
+                                                    communityMap[entry.targetId]?.let {
+                                                        viewModel.recordCommunityInteractionSearch(it)
+                                                        onDismiss()
+                                                        onSelectCommunity(it)
+                                                    } ?: run { query = entry.title }
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.History,
+                                        contentDescription = null,
+                                        tint = WhatsAppTeal,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(entry.title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                    if (entry.subtitle.isNotBlank()) {
+                                        Text(
+                                            entry.subtitle,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (matchedUsers.isNotEmpty()) {
+                            item(key = "people_results_header") {
+                                Text("People", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            }
+                            items(matchedUsers, key = { "u_${it.uid}" }) { user ->
+                                val isFollowing = user.uid in followingIds
+                                val followsMe = user.uid in followerIds
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            viewModel.recordQuerySearch(query)
+                                            viewModel.recordUserInteractionSearch(user)
+                                            onDismiss()
+                                            onSelectUser(user.uid)
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    WeConnectAvatar(
+                                        displayName = user.displayName,
+                                        avatarBase64 = user.avatarBase64,
+                                        size = 38.dp,
+                                        showOnlineDot = user.onlineStatusVisible,
+                                        isOnline = user.isEffectivelyOnline(nowMs)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(user.displayName, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            text = "@${user.username}" + if (followsMe) " · Follows you" else "",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (myProfile != null) {
+                                        Surface(
+                                            onClick = {
+                                                scope.launch {
+                                                    viewModel.handleResult(
+                                                        viewModel.authRepo.toggleFollow(myProfile, user, isFollowing),
+                                                        if (isFollowing) "Unfollowed @${user.username}" else "Following @${user.username}"
+                                                    )
+                                                }
+                                            },
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = if (isFollowing) MaterialTheme.colorScheme.secondaryContainer else WhatsAppEmerald.copy(alpha = 0.14f)
+                                        ) {
+                                            Text(
+                                                text = if (isFollowing) "Following" else if (followsMe) "Follow Back" else "Follow",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (isFollowing) MaterialTheme.colorScheme.onSecondaryContainer else WhatsAppEmerald,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (matchedCommunities.isNotEmpty()) {
+                            item(key = "comm_results_header") {
+                                Text("Communities & Channels", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            }
+                            items(matchedCommunities, key = { "c_${it.id}" }) { comm ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            viewModel.recordQuerySearch(query)
+                                            viewModel.recordCommunityInteractionSearch(comm)
+                                            onDismiss()
+                                            onSelectCommunity(comm)
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        color = WhatsAppTeal,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = if (comm.kind == "CHANNEL") Icons.Default.Campaign else Icons.Default.Groups,
+                                                contentDescription = null,
+                                                tint = PureWhite,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(comm.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(
+                                            text = "${comm.memberCount} member(s)" + if (comm.description.isNotBlank()) " · ${comm.description}" else "",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (matchedPosts.isNotEmpty()) {
+                            item(key = "post_results_header") {
+                                Text("Posts", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            }
+                            items(matchedPosts, key = { "p_${it.id}" }) { post ->
+                                Surface(
+                                    onClick = {
+                                        viewModel.recordQuerySearch(query)
+                                        profileMap[post.authorId]?.let { viewModel.recordUserInteractionSearch(it) }
+                                        onDismiss()
+                                        onSelectUser(post.authorId)
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "@${post.authorUsername}: ${post.caption.take(100)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.padding(10.dp),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
+                        if (matchedUsers.isEmpty() && matchedCommunities.isEmpty() && matchedPosts.isEmpty() && matchingHistory.isEmpty()) {
+                            item(key = "no_search_results") {
+                                Text(
+                                    text = "No results found for \"$query\".",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 24.dp, horizontal = 8.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Close") } }
-    )
+        }
+    }
 }
+

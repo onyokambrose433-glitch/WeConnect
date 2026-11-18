@@ -37,7 +37,24 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.UUID
+
+enum class SearchHistoryKind {
+    QUERY,
+    USER,
+    COMMUNITY
+}
+
+data class SearchHistoryEntry(
+    val id: String,
+    val kind: SearchHistoryKind,
+    val targetId: String,
+    val title: String,
+    val subtitle: String = "",
+    val timestampMs: Long = System.currentTimeMillis()
+)
 
 data class PendingOutgoingMessage(
     val id: String = UUID.randomUUID().toString(),
@@ -231,6 +248,221 @@ class WeConnectViewModel(
             emit(UiState.Error(extractFirestoreMessage(error, "Failed to load calls")))
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
+
+    private val _pinnedChatIds = MutableStateFlow(
+        notifPrefs?.getStringSet("pinned_chats", emptySet())?.toSet() ?: emptySet()
+    )
+    val pinnedChatIds: StateFlow<Set<String>> = _pinnedChatIds.asStateFlow()
+
+    fun togglePinChat(chatId: String): Boolean {
+        if (chatId.isBlank()) return false
+        var nowPinned = false
+        _pinnedChatIds.update { current ->
+            nowPinned = chatId !in current
+            val updated = if (nowPinned) current + chatId else current - chatId
+            notifPrefs?.edit()?.putStringSet("pinned_chats", updated)?.apply()
+            updated
+        }
+        return nowPinned
+    }
+
+    private val _searchHistory = MutableStateFlow(
+        decodeSearchHistory(notifPrefs?.getString("search_history_json", null))
+    )
+    val searchHistory: StateFlow<List<SearchHistoryEntry>> = _searchHistory.asStateFlow()
+
+    private fun saveSearchHistory(list: List<SearchHistoryEntry>) {
+        notifPrefs?.edit()?.putString("search_history_json", encodeSearchHistory(list))?.apply()
+    }
+
+    fun recordQuerySearch(rawQuery: String) {
+        val clean = rawQuery.trim()
+        if (clean.length < 2) return
+        val entry = SearchHistoryEntry(
+            id = "q_${clean.lowercase()}",
+            kind = SearchHistoryKind.QUERY,
+            targetId = clean,
+            title = clean,
+            subtitle = "Recent search"
+        )
+        _searchHistory.update { current ->
+            val updated = upsertSearchEntry(current, entry)
+            saveSearchHistory(updated)
+            updated
+        }
+    }
+
+    fun recordUserInteractionSearch(user: PublicProfile) {
+        if (user.uid.isBlank() || user.uid == currentUserId) return
+        val entry = SearchHistoryEntry(
+            id = "u_${user.uid}",
+            kind = SearchHistoryKind.USER,
+            targetId = user.uid,
+            title = user.displayName.ifBlank { "@${user.username}" },
+            subtitle = "@${user.username}"
+        )
+        _searchHistory.update { current ->
+            val updated = upsertSearchEntry(current, entry)
+            saveSearchHistory(updated)
+            updated
+        }
+    }
+
+    fun recordCommunityInteractionSearch(community: Community) {
+        if (community.id.isBlank()) return
+        val entry = SearchHistoryEntry(
+            id = "c_${community.id}",
+            kind = SearchHistoryKind.COMMUNITY,
+            targetId = community.id,
+            title = community.name,
+            subtitle = "${if (community.kind == "CHANNEL") "Channel" else "Community"} · ${community.memberCount} member(s)"
+        )
+        _searchHistory.update { current ->
+            val updated = upsertSearchEntry(current, entry)
+            saveSearchHistory(updated)
+            updated
+        }
+    }
+
+    fun removeSearchHistoryItem(id: String) {
+        _searchHistory.update { current ->
+            val updated = current.filterNot { it.id == id }
+            saveSearchHistory(updated)
+            updated
+        }
+    }
+
+    fun clearSearchHistory() {
+        _searchHistory.value = emptyList()
+        notifPrefs?.edit()?.remove("search_history_json")?.apply()
+    }
+
+    val recentInteractedUsers: StateFlow<List<PublicProfile>> = combine(
+        searchHistory,
+        conversationsState,
+        allProfilesState,
+        blockedUsers,
+        followingIds
+    ) { history, convState, profilesUi, blocked, following ->
+        val profiles = (profilesUi as? UiState.Success)?.data ?: emptyList()
+        val blockedSet = blocked.map { it.blockedUid }.toSet()
+        val profileMap = profiles
+            .filter { it.uid != currentUserId && it.uid !in blockedSet }
+            .associateBy { it.uid }
+
+        val rankedIds = LinkedHashSet<String>()
+
+        // 1. Users from recent search / profile interactions
+        history.filter { it.kind == SearchHistoryKind.USER }
+            .forEach { if (it.targetId in profileMap) rankedIds.add(it.targetId) }
+
+        // 2. Peers from recent conversations sorted by recency
+        val convs = (convState as? UiState.Success)?.data ?: emptyList()
+        convs.sortedByDescending { (it.lastMessageAt ?: it.updatedAt ?: it.createdAt)?.seconds ?: 0L }
+            .forEach { conv ->
+                conv.memberUids.filter { it != currentUserId && it in profileMap }
+                    .forEach { rankedIds.add(it) }
+            }
+
+        // 3. People the user follows
+        following.filter { it in profileMap }.forEach { rankedIds.add(it) }
+
+        rankedIds.mapNotNull { profileMap[it] }.take(12)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    val recentInteractedCommunities: StateFlow<List<Community>> = combine(
+        searchHistory,
+        communitiesState,
+        notifications
+    ) { history, commUi, notifs ->
+        val communities = (commUi as? UiState.Success)?.data ?: emptyList()
+        val commMap = communities.associateBy { it.id }
+        val rankedIds = LinkedHashSet<String>()
+
+        // 1. Communities from search / view interactions
+        history.filter { it.kind == SearchHistoryKind.COMMUNITY }
+            .forEach { if (it.targetId in commMap) rankedIds.add(it.targetId) }
+
+        // 2. Communities mentioned in user's notifications
+        notifs.filter { it.type == "COMMUNITY" && it.targetId in commMap }
+            .forEach { rankedIds.add(it.targetId) }
+
+        // 3. Communities owned or administered by user
+        communities.filter { it.ownerId == currentUserId || currentUserId in it.adminUids }
+            .sortedByDescending { (it.updatedAt ?: it.createdAt)?.seconds ?: 0L }
+            .forEach { rankedIds.add(it.id) }
+
+        // 4. Fallback popular communities so suggestions remain helpful
+        communities.sortedByDescending { it.memberCount }
+            .forEach { rankedIds.add(it.id) }
+
+        rankedIds.mapNotNull { commMap[it] }.take(8)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    companion object {
+        private const val MAX_SEARCH_HISTORY = 20
+
+        fun upsertSearchEntry(
+            current: List<SearchHistoryEntry>,
+            entry: SearchHistoryEntry
+        ): List<SearchHistoryEntry> {
+            val stamped = entry.copy(timestampMs = System.currentTimeMillis())
+            val filtered = current.filterNot {
+                it.id == stamped.id ||
+                    (it.kind == stamped.kind && it.targetId.equals(stamped.targetId, ignoreCase = true))
+            }
+            return (listOf(stamped) + filtered).take(MAX_SEARCH_HISTORY)
+        }
+
+        fun encodeSearchHistory(entries: List<SearchHistoryEntry>): String {
+            val arr = JSONArray()
+            entries.take(MAX_SEARCH_HISTORY).forEach { e ->
+                arr.put(
+                    JSONObject().apply {
+                        put("id", e.id)
+                        put("kind", e.kind.name)
+                        put("targetId", e.targetId)
+                        put("title", e.title)
+                        put("subtitle", e.subtitle)
+                        put("timestampMs", e.timestampMs)
+                    }
+                )
+            }
+            return arr.toString()
+        }
+
+        fun decodeSearchHistory(raw: String?): List<SearchHistoryEntry> {
+            if (raw.isNullOrBlank()) return emptyList()
+            return try {
+                val arr = JSONArray(raw)
+                buildList {
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        val kindName = obj.optString("kind", SearchHistoryKind.QUERY.name)
+                        val kind = runCatching { SearchHistoryKind.valueOf(kindName) }
+                            .getOrDefault(SearchHistoryKind.QUERY)
+                        val id = obj.optString("id")
+                        val targetId = obj.optString("targetId")
+                        val title = obj.optString("title")
+                        if (id.isNotBlank() && title.isNotBlank()) {
+                            add(
+                                SearchHistoryEntry(
+                                    id = id,
+                                    kind = kind,
+                                    targetId = targetId,
+                                    title = title,
+                                    subtitle = obj.optString("subtitle", ""),
+                                    timestampMs = obj.optLong("timestampMs", 0L)
+                                )
+                            )
+                        }
+                    }
+                }.take(MAX_SEARCH_HISTORY)
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+    }
 
     init {
         viewModelScope.launch {

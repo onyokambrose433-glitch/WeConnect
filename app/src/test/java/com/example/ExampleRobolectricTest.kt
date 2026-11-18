@@ -7,7 +7,11 @@ import com.example.data.model.PostComment
 import com.example.data.model.PublicProfile
 import com.example.data.model.isEffectivelyOnline
 import com.example.data.repository.AuthProfileRepository
+import com.example.ui.components.formatInboxTimestamp
 import com.example.ui.home.buildCommentThreads
+import com.example.ui.main.SearchHistoryEntry
+import com.example.ui.main.SearchHistoryKind
+import com.example.ui.main.WeConnectViewModel
 import com.google.firebase.Timestamp
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -88,6 +92,46 @@ class ExampleRobolectricTest {
 
         assertEquals("r3", threads[2].root.id)
         assertNull(threads[2].replies.firstOrNull())
+    }
+
+    @Test
+    fun `search history deduplicates, promotes recent entries, and roundtrips JSON`() {
+        val q1 = SearchHistoryEntry(id = "q_tech", kind = SearchHistoryKind.QUERY, targetId = "Tech", title = "Tech")
+        val u1 = SearchHistoryEntry(id = "u_alice", kind = SearchHistoryKind.USER, targetId = "alice", title = "Alice", subtitle = "@alice")
+        val c1 = SearchHistoryEntry(id = "c_builders", kind = SearchHistoryKind.COMMUNITY, targetId = "comm1", title = "Builders")
+        val q1Repeat = SearchHistoryEntry(id = "q_tech", kind = SearchHistoryKind.QUERY, targetId = "tech", title = "tech")
+
+        var list = emptyList<SearchHistoryEntry>()
+        list = WeConnectViewModel.upsertSearchEntry(list, q1)
+        list = WeConnectViewModel.upsertSearchEntry(list, u1)
+        list = WeConnectViewModel.upsertSearchEntry(list, c1)
+        list = WeConnectViewModel.upsertSearchEntry(list, q1Repeat)
+
+        assertEquals(3, list.size)
+        assertEquals("tech", list[0].title)
+        assertEquals(SearchHistoryKind.COMMUNITY, list[1].kind)
+        assertEquals(SearchHistoryKind.USER, list[2].kind)
+
+        val encoded = WeConnectViewModel.encodeSearchHistory(list)
+        val decoded = WeConnectViewModel.decodeSearchHistory(encoded)
+        assertEquals(3, decoded.size)
+        assertEquals(list.map { it.id }, decoded.map { it.id })
+        assertEquals(list.map { it.kind }, decoded.map { it.kind })
+    }
+
+    @Test
+    fun `inbox timestamp formats today yesterday and older dates in WhatsApp style`() {
+        val cal = java.util.Calendar.getInstance().apply {
+            set(2026, java.util.Calendar.NOVEMBER, 18, 14, 30, 0)
+        }
+        val nowMs = cal.timeInMillis
+        val todayTs = Timestamp((nowMs - 3_600_000L) / 1000L, 0)
+        val yesterdayTs = Timestamp((nowMs - 24L * 3_600_000L) / 1000L, 0)
+        val olderTs = Timestamp((nowMs - 14L * 24L * 3_600_000L) / 1000L, 0)
+
+        assertTrue(formatInboxTimestamp(todayTs, nowMs).contains(":"))
+        assertEquals("Yesterday", formatInboxTimestamp(yesterdayTs, nowMs))
+        assertTrue(formatInboxTimestamp(olderTs, nowMs).contains("/"))
     }
 
     @Test

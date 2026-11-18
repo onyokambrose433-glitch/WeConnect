@@ -486,6 +486,7 @@ private fun WeConnectShell(
     }
 
     val openDirectChatWithPeer: (PublicProfile) -> Unit = { peer ->
+        viewModel.recordUserInteractionSearch(peer)
         scope.launch {
             viewModel.handleResult(viewModel.messagingRepo.createOrOpenDirectChat(myProfile, peer)) { chatId ->
                 activeTab = MainTab.CHATS
@@ -704,12 +705,16 @@ private fun WeConnectShell(
                                 viewModel = viewModel,
                                 myProfile = myProfile,
                                 onOpenChat = { openChatId = it },
-                                onOpenGemini = { showGeminiDialog = true }
+                                onOpenGemini = { showGeminiDialog = true },
+                                onOpenUserProfile = { inspectUserUid = it }
                             )
                             MainTab.COMMUNITIES -> CommunitiesScreen(
                                 viewModel = viewModel,
                                 myProfile = myProfile,
-                                onOpenCommunity = { openCommunityId = it.id }
+                                onOpenCommunity = { comm ->
+                                    viewModel.recordCommunityInteractionSearch(comm)
+                                    openCommunityId = comm.id
+                                }
                             )
                             MainTab.CALLS -> CallsScreen(
                                 viewModel = viewModel,
@@ -737,6 +742,7 @@ private fun WeConnectShell(
             onDismiss = { showSearchDialog = false },
             onSelectUser = { uid -> inspectUserUid = uid },
             onSelectCommunity = { comm ->
+                viewModel.recordCommunityInteractionSearch(comm)
                 activeTab = MainTab.COMMUNITIES
                 openCommunityId = comm.id
             }

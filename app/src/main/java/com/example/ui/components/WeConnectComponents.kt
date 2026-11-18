@@ -265,3 +265,20 @@ fun formatLastSeenTime(ts: Timestamp?): String {
         else -> SimpleDateFormat("MMM d 'at' h:mm a", Locale.getDefault()).format(Date(time))
     }
 }
+
+fun formatInboxTimestamp(ts: Timestamp?, nowMs: Long = System.currentTimeMillis()): String {
+    if (ts == null) return ""
+    val timeMs = ts.seconds * 1000L
+    val calNow = java.util.Calendar.getInstance().apply { timeInMillis = nowMs }
+    val calTarget = java.util.Calendar.getInstance().apply { timeInMillis = timeMs }
+    val sameYear = calNow.get(java.util.Calendar.YEAR) == calTarget.get(java.util.Calendar.YEAR)
+    val dayDiff = calNow.get(java.util.Calendar.DAY_OF_YEAR) - calTarget.get(java.util.Calendar.DAY_OF_YEAR)
+
+    return when {
+        sameYear && dayDiff == 0 -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timeMs))
+        sameYear && dayDiff == 1 -> "Yesterday"
+        sameYear && dayDiff in 2..6 -> SimpleDateFormat("EEE", Locale.getDefault()).format(Date(timeMs))
+        else -> SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(Date(timeMs))
+    }
+}
+
