@@ -623,7 +623,8 @@ private fun WeConnectShell(
                             MainTab.HOME -> HomeScreen(
                                 viewModel = viewModel,
                                 myProfile = myProfile,
-                                onOpenUserProfile = { inspectUserUid = it }
+                                onOpenUserProfile = { inspectUserUid = it },
+                                onMessageUser = openDirectChatWithPeer
                             )
                             MainTab.CHATS -> ChatsListScreen(
                                 viewModel = viewModel,
@@ -644,7 +645,8 @@ private fun WeConnectShell(
                             MainTab.PROFILE -> ProfileScreen(
                                 viewModel = viewModel,
                                 myProfile = myProfile,
-                                onSignOut = onSignOut
+                                onSignOut = onSignOut,
+                                onMessageUser = openDirectChatWithPeer
                             )
                         }
                     }

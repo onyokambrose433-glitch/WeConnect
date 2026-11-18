@@ -101,6 +101,10 @@ class WeConnectViewModel(
         .catch { error -> if (error is CancellationException) throw error }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptySet())
 
+    val followerIds: StateFlow<Set<String>> = authRepo.observeFollowerIds(currentUserId)
+        .catch { error -> if (error is CancellationException) throw error }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptySet())
+
     val blockedUsers: StateFlow<List<BlockedUser>> = authRepo.observeBlockedUsers(currentUserId)
         .catch { error -> if (error is CancellationException) throw error }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())

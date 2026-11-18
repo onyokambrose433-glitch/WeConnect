@@ -53,9 +53,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -90,7 +93,8 @@ import kotlinx.coroutines.launch
 fun ProfileScreen(
     viewModel: WeConnectViewModel,
     myProfile: PublicProfile,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    onMessageUser: (PublicProfile) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -101,6 +105,10 @@ fun ProfileScreen(
     val notifications by viewModel.notifications.collectAsStateWithLifecycle()
     val deviceIdentity by viewModel.deviceIdentity.collectAsStateWithLifecycle()
     val isOnlineNetwork by viewModel.isOnlineNetwork.collectAsStateWithLifecycle()
+    val allProfilesState by viewModel.allProfilesState.collectAsStateWithLifecycle()
+    val followingIds by viewModel.followingIds.collectAsStateWithLifecycle()
+    val followerIds by viewModel.followerIds.collectAsStateWithLifecycle()
+    val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
     val myPosts by remember(myProfile.uid) {
         viewModel.socialRepo.observeUserPosts(myProfile.uid)
     }.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -110,6 +118,7 @@ fun ProfileScreen(
     var showDevicesDialog by remember { mutableStateOf(false) }
     var showNotificationsDialog by remember { mutableStateOf(false) }
     var showSignOutConfirm by remember { mutableStateOf(false) }
+    var connectionsInitialTab by remember { mutableStateOf<Int?>(null) }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
@@ -152,8 +161,16 @@ fun ProfileScreen(
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
                             StatBox("Posts", myProfile.postsCount)
-                            StatBox("Followers", myProfile.followersCount)
-                            StatBox("Following", myProfile.followingCount)
+                            StatBox(
+                                label = "Followers",
+                                count = followerIds.size.toLong().coerceAtLeast(myProfile.followersCount),
+                                onClick = { connectionsInitialTab = 0 }
+                            )
+                            StatBox(
+                                label = "Following",
+                                count = followingIds.size.toLong().coerceAtLeast(myProfile.followingCount),
+                                onClick = { connectionsInitialTab = 1 }
+                            )
                         }
                         Spacer(Modifier.height(14.dp))
                         OutlinedButton(
@@ -392,11 +409,135 @@ fun ProfileScreen(
             dismissButton = { OutlinedButton(onClick = { showSignOutConfirm = false }) { Text("Cancel") } }
         )
     }
+
+    connectionsInitialTab?.let { startTab ->
+        val profiles = (allProfilesState as? UiState.Success)?.data ?: emptyList()
+        ConnectionsDialog(
+            initialTab = startTab,
+            allProfiles = profiles.filter { it.uid != myProfile.uid },
+            followingIds = followingIds,
+            followerIds = followerIds,
+            nowMs = nowMs,
+            onDismiss = { connectionsInitialTab = null },
+            onToggleFollow = { user, isFollowing ->
+                scope.launch {
+                    viewModel.handleResult(
+                        viewModel.authRepo.toggleFollow(myProfile, user, isFollowing),
+                        if (isFollowing) "Unfollowed @${user.username}" else "Following @${user.username}"
+                    )
+                }
+            },
+            onChatWithUser = { user ->
+                connectionsInitialTab = null
+                onMessageUser(user)
+            }
+        )
+    }
 }
 
 @Composable
-private fun StatBox(label: String, count: Long) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun ConnectionsDialog(
+    initialTab: Int,
+    allProfiles: List<PublicProfile>,
+    followingIds: Set<String>,
+    followerIds: Set<String>,
+    nowMs: Long,
+    onDismiss: () -> Unit,
+    onToggleFollow: (PublicProfile, Boolean) -> Unit,
+    onChatWithUser: (PublicProfile) -> Unit
+) {
+    var tab by remember { mutableIntStateOf(initialTab) }
+    val followersList = remember(allProfiles, followerIds) { allProfiles.filter { it.uid in followerIds } }
+    val followingList = remember(allProfiles, followingIds) { allProfiles.filter { it.uid in followingIds } }
+    val displayList = if (tab == 0) followersList else followingList
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Connections") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                TabRow(selectedTabIndex = tab) {
+                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Followers (${followersList.size})") })
+                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Following (${followingList.size})") })
+                }
+                Spacer(Modifier.height(10.dp))
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(250.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (displayList.isEmpty()) {
+                        item {
+                            Text(
+                                text = if (tab == 0) "No followers yet." else "You aren't following anyone yet. Browse Find People on Home to connect!",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    } else {
+                        items(displayList, key = { "conn_${tab}_${it.uid}" }) { user ->
+                            val isFollowing = user.uid in followingIds
+                            val followsMe = user.uid in followerIds
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                WeConnectAvatar(
+                                    displayName = user.displayName,
+                                    avatarBase64 = user.avatarBase64,
+                                    size = 38.dp,
+                                    showOnlineDot = user.onlineStatusVisible,
+                                    isOnline = user.isEffectivelyOnline(nowMs)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(user.displayName, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                                    Text(
+                                        text = "@${user.username}" + if (isFollowing && followsMe) " · Mutual" else "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isFollowing && followsMe) WhatsAppEmerald else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Surface(
+                                    onClick = { onToggleFollow(user, isFollowing) },
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = if (isFollowing) MaterialTheme.colorScheme.secondaryContainer else WhatsAppEmerald
+                                ) {
+                                    Text(
+                                        text = if (isFollowing) "Following" else if (followsMe) "Follow Back" else "Follow",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isFollowing) MaterialTheme.colorScheme.onSecondaryContainer else PureWhite,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                    )
+                                }
+                                Spacer(Modifier.width(4.dp))
+                                IconButton(onClick = { onChatWithUser(user) }, modifier = Modifier.size(34.dp)) {
+                                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat", tint = WhatsAppTeal, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Close") } }
+    )
+}
+
+@Composable
+private fun StatBox(label: String, count: Long, onClick: (() -> Unit)? = null) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = if (onClick != null) {
+            Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { onClick() }
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        } else Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
         Text("$count", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -566,6 +707,7 @@ fun UserPublicProfileDialog(
     val scope = rememberCoroutineScope()
     val allProfilesState by viewModel.allProfilesState.collectAsStateWithLifecycle()
     val followingIds by viewModel.followingIds.collectAsStateWithLifecycle()
+    val followerIds by viewModel.followerIds.collectAsStateWithLifecycle()
     val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
     val target = remember(allProfilesState, targetUid) {
         ((allProfilesState as? UiState.Success)?.data ?: emptyList()).firstOrNull { it.uid == targetUid }
@@ -583,6 +725,7 @@ fun UserPublicProfileDialog(
     }
 
     val isFollowing = target.uid in followingIds
+    val followsMe = target.uid in followerIds
     val targetOnline = target.isEffectivelyOnline(nowMs)
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -598,7 +741,22 @@ fun UserPublicProfileDialog(
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(target.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("@${target.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("@${target.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        if (followsMe) {
+                            Surface(
+                                color = if (isFollowing) WhatsAppGreen.copy(alpha = 0.14f) else WhatsAppTeal.copy(alpha = 0.14f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = if (isFollowing) "Mutual" else "Follows you",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isFollowing) WhatsAppEmerald else WhatsAppTeal,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
                     if (target.onlineStatusVisible) {
                         Spacer(Modifier.height(3.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -632,7 +790,10 @@ fun UserPublicProfileDialog(
                         Button(
                             onClick = {
                                 scope.launch {
-                                    viewModel.handleResult(viewModel.authRepo.toggleFollow(myProfile, target, isFollowing))
+                                    viewModel.handleResult(
+                                        viewModel.authRepo.toggleFollow(myProfile, target, isFollowing),
+                                        if (isFollowing) "Unfollowed @${target.username}" else "Following @${target.username}"
+                                    )
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(
@@ -641,7 +802,7 @@ fun UserPublicProfileDialog(
                             ),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(if (isFollowing) "Following" else "Follow")
+                            Text(if (isFollowing) "Following" else if (followsMe) "Follow Back" else "Follow")
                         }
                         OutlinedButton(
                             onClick = { onDismiss(); onMessageUser(target) },
@@ -714,9 +875,13 @@ fun GlobalSearchDialog(
     onSelectCommunity: (com.example.data.model.Community) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     val profiles = (viewModel.allProfilesState.collectAsStateWithLifecycle().value as? UiState.Success)?.data ?: emptyList()
     val communities = (viewModel.communitiesState.collectAsStateWithLifecycle().value as? UiState.Success)?.data ?: emptyList()
     val posts = (viewModel.publicPostsState.collectAsStateWithLifecycle().value as? UiState.Success)?.data ?: emptyList()
+    val myProfile = (viewModel.myProfileState.collectAsStateWithLifecycle().value as? UiState.Success)?.data
+    val followingIds by viewModel.followingIds.collectAsStateWithLifecycle()
+    val followerIds by viewModel.followerIds.collectAsStateWithLifecycle()
     val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
 
     val matchedUsers = remember(query, profiles) {
@@ -752,6 +917,8 @@ fun GlobalSearchDialog(
                     if (matchedUsers.isNotEmpty()) {
                         item { Text("People", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) }
                         items(matchedUsers, key = { "u_${it.uid}" }) { user ->
+                            val isFollowing = user.uid in followingIds
+                            val followsMe = user.uid in followerIds
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -767,9 +934,31 @@ fun GlobalSearchDialog(
                                     isOnline = user.isEffectivelyOnline(nowMs)
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(user.displayName, style = MaterialTheme.typography.titleSmall)
                                     Text("@${user.username}", style = MaterialTheme.typography.bodySmall)
+                                }
+                                if (myProfile != null) {
+                                    Surface(
+                                        onClick = {
+                                            scope.launch {
+                                                viewModel.handleResult(
+                                                    viewModel.authRepo.toggleFollow(myProfile, user, isFollowing),
+                                                    if (isFollowing) "Unfollowed @${user.username}" else "Following @${user.username}"
+                                                )
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (isFollowing) MaterialTheme.colorScheme.secondaryContainer else WhatsAppEmerald.copy(alpha = 0.14f)
+                                    ) {
+                                        Text(
+                                            text = if (isFollowing) "Following" else if (followsMe) "Follow Back" else "Follow",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isFollowing) MaterialTheme.colorScheme.onSecondaryContainer else WhatsAppEmerald,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
                                 }
                             }
                         }

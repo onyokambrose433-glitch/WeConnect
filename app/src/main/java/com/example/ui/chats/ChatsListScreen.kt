@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -97,8 +98,14 @@ fun ChatsListScreen(
     val isOnlineNetwork by viewModel.isOnlineNetwork.collectAsStateWithLifecycle()
     val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
     val pendingMessages by viewModel.pendingMessages.collectAsStateWithLifecycle()
+    val followingIds by viewModel.followingIds.collectAsStateWithLifecycle()
+    val followerIds by viewModel.followerIds.collectAsStateWithLifecycle()
 
     val blockedSet = remember(blockedUsers) { blockedUsers.map { it.blockedUid }.toSet() }
+    val allDiscoverableUsers = remember(allProfilesState, blockedSet, myProfile.uid) {
+        ((allProfilesState as? UiState.Success)?.data ?: emptyList())
+            .filter { it.uid != myProfile.uid && it.uid !in blockedSet }
+    }
     val profilesMap = remember(allProfilesState) {
         ((allProfilesState as? UiState.Success)?.data ?: emptyList()).associateBy { it.uid }
     }
@@ -267,13 +274,21 @@ fun ChatsListScreen(
                                 }
                             }
 
-                        if (list.isEmpty()) {
+                        val matchingPeople = remember(allDiscoverableUsers, searchQuery) {
+                            allDiscoverableUsers.filter { user ->
+                                searchQuery.isBlank() ||
+                                    user.displayName.contains(searchQuery, ignoreCase = true) ||
+                                    user.username.contains(searchQuery, ignoreCase = true)
+                            }
+                        }
+
+                        if (list.isEmpty() && (searchQuery.isBlank() || matchingPeople.isEmpty())) {
                             Box(Modifier.padding(16.dp)) {
                                 EmptyStateCard(
                                     icon = Icons.AutoMirrored.Filled.Chat,
                                     title = if (showArchived) "No archived chats" else "Start a real conversation",
-                                    subtitle = "Search any registered WeConnect user to start an end-to-end encrypted 1-to-1 chat or create a group.",
-                                    actionLabel = "New Chat",
+                                    subtitle = "Search any registered WeConnect user to follow them and start an end-to-end encrypted 1-to-1 chat or group.",
+                                    actionLabel = "Find People & Chat",
                                     onAction = { showNewChatDialog = true }
                                 )
                             }
@@ -441,6 +456,109 @@ fun ChatsListScreen(
                                         }
                                     }
                                 }
+                                if (matchingPeople.isNotEmpty() && !showArchived) {
+                                    item(key = "people_section_header") {
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            text = if (searchQuery.isBlank()) "People on WeConnect · Follow & Chat" else "People matching \"$searchQuery\"",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    items(matchingPeople.take(15), key = { "people_chat_${it.uid}" }) { person ->
+                                        val isFollowing = person.uid in followingIds
+                                        val followsMe = person.uid in followerIds
+                                        val isOnline = person.isEffectivelyOnline(nowMs)
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    scope.launch {
+                                                        viewModel.handleResult(
+                                                            viewModel.messagingRepo.createOrOpenDirectChat(myProfile, person)
+                                                        ) { chatId -> onOpenChat(chatId) }
+                                                    }
+                                                },
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                WeConnectAvatar(
+                                                    displayName = person.displayName,
+                                                    avatarBase64 = person.avatarBase64,
+                                                    size = 44.dp,
+                                                    showOnlineDot = person.onlineStatusVisible,
+                                                    isOnline = isOnline
+                                                )
+                                                Spacer(Modifier.width(12.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Text(
+                                                            text = person.displayName,
+                                                            style = MaterialTheme.typography.titleSmall,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                            modifier = Modifier.weight(1f, fill = false)
+                                                        )
+                                                        if (followsMe) {
+                                                            Surface(
+                                                                color = if (isFollowing) WhatsAppGreen.copy(alpha = 0.14f) else WhatsAppTeal.copy(alpha = 0.14f),
+                                                                shape = RoundedCornerShape(8.dp)
+                                                            ) {
+                                                                Text(
+                                                                    text = if (isFollowing) "Mutual" else "Follows you",
+                                                                    style = MaterialTheme.typography.labelSmall,
+                                                                    color = if (isFollowing) WhatsAppEmerald else WhatsAppTeal,
+                                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                    Text(
+                                                        text = "@${person.username} · " + if (isOnline) "online" else "offline",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = if (isOnline) WhatsAppEmerald else WhatsAppOfflineGray,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                                Spacer(Modifier.width(8.dp))
+                                                Button(
+                                                    onClick = {
+                                                        scope.launch {
+                                                            viewModel.handleResult(
+                                                                viewModel.authRepo.toggleFollow(myProfile, person, isFollowing),
+                                                                if (isFollowing) "Unfollowed @${person.username}" else "Following @${person.username}"
+                                                            )
+                                                        }
+                                                    },
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = if (isFollowing) MaterialTheme.colorScheme.secondaryContainer else WhatsAppEmerald,
+                                                        contentColor = if (isFollowing) MaterialTheme.colorScheme.onSecondaryContainer else PureWhite
+                                                    ),
+                                                    modifier = Modifier.height(34.dp)
+                                                ) {
+                                                    Text(
+                                                        text = when {
+                                                            isFollowing -> "Following"
+                                                            followsMe -> "Follow Back"
+                                                            else -> "Follow"
+                                                        },
+                                                        style = MaterialTheme.typography.labelSmall
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -450,12 +568,20 @@ fun ChatsListScreen(
     }
 
     if (showNewChatDialog) {
-        val users = ((allProfilesState as? UiState.Success)?.data ?: emptyList())
-            .filter { it.uid != myProfile.uid && it.uid !in blockedSet }
         NewChatOrGroupDialog(
-            availableUsers = users,
+            availableUsers = allDiscoverableUsers,
+            followingIds = followingIds,
+            followerIds = followerIds,
             nowMs = nowMs,
             onDismiss = { showNewChatDialog = false },
+            onToggleFollow = { user, isFollowing ->
+                scope.launch {
+                    viewModel.handleResult(
+                        viewModel.authRepo.toggleFollow(myProfile, user, isFollowing),
+                        if (isFollowing) "Unfollowed @${user.username}" else "Following @${user.username}"
+                    )
+                }
+            },
             onStartDirectChat = { peer ->
                 scope.launch {
                     viewModel.handleResult(
@@ -493,8 +619,11 @@ fun conversationDisplayName(
 @Composable
 private fun NewChatOrGroupDialog(
     availableUsers: List<PublicProfile>,
+    followingIds: Set<String>,
+    followerIds: Set<String>,
     nowMs: Long,
     onDismiss: () -> Unit,
+    onToggleFollow: (PublicProfile, Boolean) -> Unit,
     onStartDirectChat: (PublicProfile) -> Unit,
     onCreateGroup: (String, String, List<PublicProfile>) -> Unit
 ) {
@@ -569,6 +698,8 @@ private fun NewChatOrGroupDialog(
                     } else {
                         items(filtered, key = { it.uid }) { user ->
                             val isSelected = selectedMembers.any { it.uid == user.uid }
+                            val isFollowing = user.uid in followingIds
+                            val followsMe = user.uid in followerIds
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -592,8 +723,14 @@ private fun NewChatOrGroupDialog(
                                 )
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(user.displayName, style = MaterialTheme.typography.titleSmall)
-                                    Text("@${user.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(user.displayName, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        text = "@${user.username}" + if (followsMe) " · Follows you" else "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                                 if (modeTab == 1) {
                                     Checkbox(
@@ -604,7 +741,21 @@ private fun NewChatOrGroupDialog(
                                         }
                                     )
                                 } else {
-                                    Icon(Icons.Default.Check, contentDescription = "Open chat", tint = WhatsAppTeal)
+                                    Surface(
+                                        onClick = { onToggleFollow(user, isFollowing) },
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (isFollowing) MaterialTheme.colorScheme.secondaryContainer else WhatsAppEmerald.copy(alpha = 0.14f)
+                                    ) {
+                                        Text(
+                                            text = if (isFollowing) "Following" else if (followsMe) "Follow Back" else "Follow",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isFollowing) MaterialTheme.colorScheme.onSecondaryContainer else WhatsAppEmerald,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Open chat", tint = WhatsAppTeal, modifier = Modifier.size(18.dp))
                                 }
                             }
                         }

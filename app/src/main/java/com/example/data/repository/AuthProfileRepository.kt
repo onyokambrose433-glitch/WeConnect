@@ -172,6 +172,27 @@ class AuthProfileRepository(
         )
     }
 
+    fun observeFollowerIds(uid: String): Flow<Set<String>> = flow {
+        val currentUid = requireUserId()
+        val path = "follows"
+        emitAll(
+            db.collection(path)
+                .whereEqualTo("followingUid", uid)
+                .snapshots()
+                .map { snap ->
+                    snap.documents.mapNotNull { it.getString("followerUid") }.toSet()
+                }
+                .catch { error ->
+                    val fe = generateSequence(error) { it.cause }.filterIsInstance<FirebaseFirestoreException>().firstOrNull()
+                    if (fe == null && error is CancellationException) throw error
+                    if (auth.currentUser?.uid == currentUid) {
+                        handleFirestoreError(fe ?: error, OperationType.LIST, path)
+                    }
+                    throw error
+                }
+        )
+    }
+
     suspend fun isUsernameAvailable(rawUsername: String): Result<Boolean> {
         val clean = normalizeUsername(rawUsername)
         if (!isValidUsernameFormat(clean)) return Result.success(false)
@@ -477,8 +498,14 @@ class AuthProfileRepository(
             val followRef = db.collection("follows").document(followId)
             path = followRef.path
 
+            val liveExists = try {
+                followRef.get().await().exists()
+            } catch (_: Exception) {
+                currentlyFollowing
+            }
+
             val batch = db.batch()
-            if (currentlyFollowing) {
+            if (liveExists) {
                 batch.delete(followRef)
                 batch.update(
                     db.collection("public_profiles").document(targetProfile.uid),
@@ -505,16 +532,17 @@ class AuthProfileRepository(
                     db.collection("public_profiles").document(uid),
                     mapOf("followingCount" to FieldValue.increment(1L), "updatedAt" to FieldValue.serverTimestamp())
                 )
+                val safeActor = myProfile.displayName.trim().take(60).ifBlank { "WeConnect User" }
                 val notifRef = db.collection("users").document(targetProfile.uid).collection("notifications").document()
                 batch.set(
                     notifRef,
                     mapOf(
                         "recipientUid" to targetProfile.uid,
                         "actorUid" to uid,
-                        "actorName" to myProfile.displayName.take(60),
+                        "actorName" to safeActor,
                         "type" to "FOLLOW",
                         "targetId" to uid,
-                        "summary" to "${myProfile.displayName} (@${myProfile.username}) started following you.",
+                        "summary" to "$safeActor (@${myProfile.username}) started following you.".take(200),
                         "read" to false,
                         "createdAt" to FieldValue.serverTimestamp()
                     )

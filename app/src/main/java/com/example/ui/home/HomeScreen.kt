@@ -41,8 +41,10 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
@@ -91,6 +93,7 @@ import com.example.data.model.PublicProfile
 import com.example.data.model.SocialPost
 import com.example.data.model.StoryItem
 import com.example.data.model.UiState
+import com.example.data.model.isEffectivelyOnline
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.ReportDialog
 import com.example.ui.components.WeConnectAvatar
@@ -103,6 +106,7 @@ import com.example.ui.theme.WhatsAppDarkTeal
 import com.example.ui.theme.WhatsAppEmerald
 import com.example.ui.theme.WhatsAppGreen
 import com.example.ui.theme.WhatsAppInkDark
+import com.example.ui.theme.WhatsAppOfflineGray
 import com.example.ui.theme.WhatsAppTeal
 import kotlinx.coroutines.launch
 
@@ -111,21 +115,33 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     viewModel: WeConnectViewModel,
     myProfile: PublicProfile,
-    onOpenUserProfile: (String) -> Unit
+    onOpenUserProfile: (String) -> Unit,
+    onMessageUser: (PublicProfile) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     val postsState by viewModel.publicPostsState.collectAsStateWithLifecycle()
     val storiesState by viewModel.storiesState.collectAsStateWithLifecycle()
+    val allProfilesState by viewModel.allProfilesState.collectAsStateWithLifecycle()
     val followingIds by viewModel.followingIds.collectAsStateWithLifecycle()
+    val followerIds by viewModel.followerIds.collectAsStateWithLifecycle()
     val savedIds by viewModel.savedPostIds.collectAsStateWithLifecycle()
     val blockedUsers by viewModel.blockedUsers.collectAsStateWithLifecycle()
+    val nowMs by viewModel.nowMsTicker.collectAsStateWithLifecycle()
 
     val blockedSet = remember(blockedUsers) { blockedUsers.map { it.blockedUid }.toSet() }
+    val allUsers = remember(allProfilesState, blockedSet, myProfile.uid) {
+        ((allProfilesState as? UiState.Success)?.data ?: emptyList())
+            .filter { it.uid != myProfile.uid && it.uid !in blockedSet }
+    }
+    val profilesMap = remember(allProfilesState) {
+        ((allProfilesState as? UiState.Success)?.data ?: emptyList()).associateBy { it.uid }
+    }
 
-    var selectedTab by remember { mutableStateOf("ALL") } // ALL, FOLLOWING, SAVED
+    var selectedTab by remember { mutableStateOf("ALL") } // ALL, FOLLOWING, PEOPLE, SAVED
     var selectedHashtag by remember { mutableStateOf<String?>(null) }
+    var peopleSearch by remember { mutableStateOf("") }
 
     var showCreatePost by remember { mutableStateOf(false) }
     var editingPost by remember { mutableStateOf<SocialPost?>(null) }
@@ -184,7 +200,14 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(horizontal = 0.dp)
                         ) {
-                            items(listOf("ALL" to "For You", "FOLLOWING" to "Following", "SAVED" to "Saved")) { (key, label) ->
+                            items(
+                                listOf(
+                                    "ALL" to "For You",
+                                    "FOLLOWING" to "Following",
+                                    "PEOPLE" to "Find People (${allUsers.size})",
+                                    "SAVED" to "Saved"
+                                )
+                            ) { (key, label) ->
                                 FilterChip(
                                     selected = selectedTab == key,
                                     onClick = { selectedTab = key },
@@ -241,103 +264,222 @@ fun HomeScreen(
                     }
                 }
 
-                // Posts Feed
-                when (val state = postsState) {
-                    is UiState.Loading -> {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(40.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(color = WhatsAppEmerald)
-                            }
+                // People You Know Strip (shown on For You when there are people to connect with)
+                if (selectedTab == "ALL" && allUsers.isNotEmpty()) {
+                    item {
+                        val prioritized = remember(allUsers, followingIds, followerIds) {
+                            allUsers.sortedWith(
+                                compareByDescending<PublicProfile> { it.uid !in followingIds && it.uid in followerIds }
+                                    .thenByDescending { it.uid !in followingIds }
+                                    .thenBy { it.displayName.lowercase() }
+                            )
                         }
+                        PeopleYouMayKnowCarousel(
+                            people = prioritized,
+                            followingIds = followingIds,
+                            followerIds = followerIds,
+                            nowMs = nowMs,
+                            onSeeAllClick = { selectedTab = "PEOPLE" },
+                            onPersonClick = { onOpenUserProfile(it.uid) },
+                            onToggleFollow = { person, isFollowing ->
+                                scope.launch {
+                                    viewModel.handleResult(
+                                        viewModel.authRepo.toggleFollow(myProfile, person, isFollowing),
+                                        if (isFollowing) "Unfollowed @${person.username}" else "Following @${person.username}"
+                                    )
+                                }
+                            },
+                            onChatClick = { person -> onMessageUser(person) }
+                        )
                     }
-                    is UiState.Error -> {
+                }
+
+                // Feed or Find People Directory
+                if (selectedTab == "PEOPLE") {
+                    item {
+                        OutlinedTextField(
+                            value = peopleSearch,
+                            onValueChange = { peopleSearch = it },
+                            placeholder = { Text("Search people you know by name or @username…") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                                .testTag("find_people_search_input")
+                        )
+                    }
+
+                    val matchedPeople = allUsers.filter { u ->
+                        peopleSearch.isBlank() ||
+                            u.displayName.contains(peopleSearch, ignoreCase = true) ||
+                            u.username.contains(peopleSearch, ignoreCase = true)
+                    }.sortedWith(
+                        compareByDescending<PublicProfile> { it.uid in followerIds && it.uid !in followingIds }
+                            .thenByDescending { it.uid in followerIds && it.uid in followingIds }
+                            .thenBy { it.displayName.lowercase() }
+                    )
+
+                    if (matchedPeople.isEmpty()) {
                         item {
                             EmptyStateCard(
-                                icon = Icons.Default.Public,
-                                title = "Unable to load feed",
-                                subtitle = state.message,
+                                icon = Icons.Default.PersonAdd,
+                                title = "No people found",
+                                subtitle = if (peopleSearch.isBlank()) {
+                                    "Invite friends to sign in on WeConnect so you can follow and chat with each other."
+                                } else {
+                                    "No users matched \"$peopleSearch\"."
+                                },
                                 modifier = Modifier.padding(horizontal = 16.dp)
                             )
                         }
+                    } else {
+                        items(matchedPeople, key = { "person_${it.uid}" }) { person ->
+                            val isFollowing = person.uid in followingIds
+                            val followsMe = person.uid in followerIds
+                            val isOnline = person.isEffectivelyOnline(nowMs)
+                            PersonConnectCard(
+                                person = person,
+                                isOnline = isOnline,
+                                isFollowing = isFollowing,
+                                followsMe = followsMe,
+                                onOpenProfile = { onOpenUserProfile(person.uid) },
+                                onToggleFollow = {
+                                    scope.launch {
+                                        viewModel.handleResult(
+                                            viewModel.authRepo.toggleFollow(myProfile, person, isFollowing),
+                                            if (isFollowing) "Unfollowed @${person.username}" else "Following @${person.username}"
+                                        )
+                                    }
+                                },
+                                onChat = { onMessageUser(person) }
+                            )
+                        }
                     }
-                    is UiState.Success -> {
-                        val filtered = state.data
-                            .filter { it.authorId !in blockedSet }
-                            .filter { post ->
-                                when (selectedTab) {
-                                    "FOLLOWING" -> post.authorId in followingIds || post.authorId == myProfile.uid
-                                    "SAVED" -> post.id in savedIds
-                                    else -> true
+                } else {
+                    when (val state = postsState) {
+                        is UiState.Loading -> {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(40.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(color = WhatsAppEmerald)
                                 }
                             }
-                            .filter { post ->
-                                selectedHashtag == null || selectedHashtag in post.hashtags
-                            }
-
-                        if (filtered.isEmpty()) {
+                        }
+                        is UiState.Error -> {
                             item {
                                 EmptyStateCard(
                                     icon = Icons.Default.Public,
-                                    title = "No posts yet",
-                                    subtitle = if (selectedTab == "FOLLOWING") {
-                                        "Follow people on WeConnect to see their updates here."
-                                    } else {
-                                        "Be the first to share an update with the WeConnect community."
-                                    },
-                                    actionLabel = "Create Post",
-                                    onAction = { showCreatePost = true },
+                                    title = "Unable to load feed",
+                                    subtitle = state.message,
                                     modifier = Modifier.padding(horizontal = 16.dp)
                                 )
                             }
-                        } else {
-                            items(filtered, key = { it.id }) { post ->
-                                PostCard(
-                                    post = post,
-                                    myUid = myProfile.uid,
-                                    isSaved = post.id in savedIds,
-                                    viewModel = viewModel,
-                                    onAuthorClick = { onOpenUserProfile(post.authorId) },
-                                    onHashtagClick = { selectedHashtag = it },
-                                    onLikeClick = {
-                                        scope.launch {
-                                            viewModel.handleResult(viewModel.socialRepo.togglePostLike(myProfile, post))
-                                        }
-                                    },
-                                    onCommentClick = { commentsPost = post },
-                                    onShareClick = {
-                                        scope.launch { viewModel.socialRepo.incrementShareCount(post.id) }
-                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                            type = "text/plain"
-                                            putExtra(
-                                                Intent.EXTRA_TEXT,
-                                                "${post.authorName} (@${post.authorUsername}) on WeConnect:\n${post.caption}"
-                                            )
-                                        }
-                                        context.startActivity(Intent.createChooser(shareIntent, "Share Post"))
-                                    },
-                                    onSaveClick = {
-                                        scope.launch {
-                                            viewModel.handleResult(
-                                                viewModel.socialRepo.toggleSavePost(post.id, post.id in savedIds)
-                                            )
-                                        }
-                                    },
-                                    onEditClick = { editingPost = post },
-                                    onDeleteClick = {
-                                        scope.launch {
-                                            viewModel.handleResult(
-                                                viewModel.socialRepo.deletePost(post.id),
-                                                "Post deleted"
-                                            )
-                                        }
-                                    },
-                                    onReportClick = { reportingPost = post }
-                                )
+                        }
+                        is UiState.Success -> {
+                            val filtered = state.data
+                                .filter { it.authorId !in blockedSet }
+                                .filter { post ->
+                                    when (selectedTab) {
+                                        "FOLLOWING" -> post.authorId in followingIds || post.authorId == myProfile.uid
+                                        "SAVED" -> post.id in savedIds
+                                        else -> true
+                                    }
+                                }
+                                .filter { post ->
+                                    selectedHashtag == null || selectedHashtag in post.hashtags
+                                }
+
+                            if (filtered.isEmpty()) {
+                                item {
+                                    EmptyStateCard(
+                                        icon = Icons.Default.Public,
+                                        title = "No posts yet",
+                                        subtitle = if (selectedTab == "FOLLOWING") {
+                                            "Follow people you know on WeConnect to see their updates here."
+                                        } else {
+                                            "Be the first to share an update with the WeConnect community."
+                                        },
+                                        actionLabel = if (selectedTab == "FOLLOWING") "Find People" else "Create Post",
+                                        onAction = {
+                                            if (selectedTab == "FOLLOWING") selectedTab = "PEOPLE"
+                                            else showCreatePost = true
+                                        },
+                                        modifier = Modifier.padding(horizontal = 16.dp)
+                                    )
+                                }
+                            } else {
+                                items(filtered, key = { it.id }) { post ->
+                                    val authorProfile = profilesMap[post.authorId]
+                                        ?: PublicProfile(
+                                            uid = post.authorId,
+                                            username = post.authorUsername,
+                                            displayName = post.authorName,
+                                            avatarBase64 = post.authorAvatarBase64
+                                        )
+                                    val isFollowingAuthor = post.authorId in followingIds
+                                    val authorFollowsMe = post.authorId in followerIds
+                                    PostCard(
+                                        post = post,
+                                        myUid = myProfile.uid,
+                                        isSaved = post.id in savedIds,
+                                        isFollowingAuthor = isFollowingAuthor,
+                                        authorFollowsMe = authorFollowsMe,
+                                        authorOnline = authorProfile.isEffectivelyOnline(nowMs),
+                                        authorShowDot = authorProfile.uid != myProfile.uid && authorProfile.onlineStatusVisible,
+                                        viewModel = viewModel,
+                                        onAuthorClick = { onOpenUserProfile(post.authorId) },
+                                        onFollowAuthorClick = {
+                                            scope.launch {
+                                                viewModel.handleResult(
+                                                    viewModel.authRepo.toggleFollow(myProfile, authorProfile, isFollowingAuthor),
+                                                    if (isFollowingAuthor) "Unfollowed @${authorProfile.username}" else "Following @${authorProfile.username}"
+                                                )
+                                            }
+                                        },
+                                        onChatAuthorClick = { onMessageUser(authorProfile) },
+                                        onHashtagClick = { selectedHashtag = it },
+                                        onLikeClick = {
+                                            scope.launch {
+                                                viewModel.handleResult(viewModel.socialRepo.togglePostLike(myProfile, post))
+                                            }
+                                        },
+                                        onCommentClick = { commentsPost = post },
+                                        onShareClick = {
+                                            scope.launch { viewModel.socialRepo.incrementShareCount(post.id) }
+                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(
+                                                    Intent.EXTRA_TEXT,
+                                                    "${post.authorName} (@${post.authorUsername}) on WeConnect:\n${post.caption}"
+                                                )
+                                            }
+                                            context.startActivity(Intent.createChooser(shareIntent, "Share Post"))
+                                        },
+                                        onSaveClick = {
+                                            scope.launch {
+                                                viewModel.handleResult(
+                                                    viewModel.socialRepo.toggleSavePost(post.id, post.id in savedIds)
+                                                )
+                                            }
+                                        },
+                                        onEditClick = { editingPost = post },
+                                        onDeleteClick = {
+                                            scope.launch {
+                                                viewModel.handleResult(
+                                                    viewModel.socialRepo.deletePost(post.id),
+                                                    "Post deleted"
+                                                )
+                                            }
+                                        },
+                                        onReportClick = { reportingPost = post }
+                                    )
+                                }
                             }
                         }
                     }
@@ -512,12 +654,275 @@ private fun StoriesStrip(
 }
 
 @Composable
+private fun PeopleYouMayKnowCarousel(
+    people: List<PublicProfile>,
+    followingIds: Set<String>,
+    followerIds: Set<String>,
+    nowMs: Long,
+    onSeeAllClick: () -> Unit,
+    onPersonClick: (PublicProfile) -> Unit,
+    onToggleFollow: (PublicProfile, Boolean) -> Unit,
+    onChatClick: (PublicProfile) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "People You May Know",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "See all",
+                style = MaterialTheme.typography.labelMedium,
+                color = WhatsAppTeal,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clickable { onSeeAllClick() }
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(people.take(15), key = { "suggest_${it.uid}" }) { person ->
+                val isFollowing = person.uid in followingIds
+                val followsMe = person.uid in followerIds
+                val isOnline = person.isEffectivelyOnline(nowMs)
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .width(158.dp)
+                        .clickable { onPersonClick(person) }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        WeConnectAvatar(
+                            displayName = person.displayName,
+                            avatarBase64 = person.avatarBase64,
+                            size = 52.dp,
+                            showOnlineDot = person.onlineStatusVisible,
+                            isOnline = isOnline
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = person.displayName,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "@${person.username}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = when {
+                                isFollowing && followsMe -> WhatsAppGreen.copy(alpha = 0.14f)
+                                followsMe -> WhatsAppTeal.copy(alpha = 0.14f)
+                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                            }
+                        ) {
+                            Text(
+                                text = when {
+                                    isFollowing && followsMe -> "Mutual"
+                                    followsMe -> "Follows you"
+                                    isOnline -> "Online"
+                                    else -> "Offline"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = when {
+                                    isFollowing && followsMe -> WhatsAppEmerald
+                                    followsMe -> WhatsAppTeal
+                                    isOnline -> WhatsAppEmerald
+                                    else -> WhatsAppOfflineGray
+                                },
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Button(
+                                onClick = { onToggleFollow(person, isFollowing) },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isFollowing) MaterialTheme.colorScheme.secondaryContainer else WhatsAppEmerald,
+                                    contentColor = if (isFollowing) MaterialTheme.colorScheme.onSecondaryContainer else PureWhite
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                            ) {
+                                Text(
+                                    text = when {
+                                        isFollowing -> "Following"
+                                        followsMe -> "Follow Back"
+                                        else -> "Follow"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Surface(
+                                onClick = { onChatClick(person) },
+                                shape = RoundedCornerShape(10.dp),
+                                color = WhatsAppTeal.copy(alpha = 0.14f),
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Chat,
+                                        contentDescription = "Chat with ${person.displayName}",
+                                        tint = WhatsAppTeal,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PersonConnectCard(
+    person: PublicProfile,
+    isOnline: Boolean,
+    isFollowing: Boolean,
+    followsMe: Boolean,
+    onOpenProfile: () -> Unit,
+    onToggleFollow: () -> Unit,
+    onChat: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clickable { onOpenProfile() },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            WeConnectAvatar(
+                displayName = person.displayName,
+                avatarBase64 = person.avatarBase64,
+                size = 48.dp,
+                showOnlineDot = person.onlineStatusVisible,
+                isOnline = isOnline
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = person.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (followsMe) {
+                        Surface(
+                            color = if (isFollowing) WhatsAppGreen.copy(alpha = 0.14f) else WhatsAppTeal.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = if (isFollowing) "Mutual" else "Follows you",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isFollowing) WhatsAppEmerald else WhatsAppTeal,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = "@${person.username}" + if (person.bio.isNotBlank()) " · ${person.bio}" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = onToggleFollow,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isFollowing) MaterialTheme.colorScheme.secondaryContainer else WhatsAppEmerald,
+                    contentColor = if (isFollowing) MaterialTheme.colorScheme.onSecondaryContainer else PureWhite
+                ),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Text(
+                    text = when {
+                        isFollowing -> "Following"
+                        followsMe -> "Follow Back"
+                        else -> "Follow"
+                    },
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            IconButton(
+                onClick = onChat,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(WhatsAppTeal.copy(alpha = 0.14f))
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Chat,
+                    contentDescription = "Chat",
+                    tint = WhatsAppTeal,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun PostCard(
     post: SocialPost,
     myUid: String,
     isSaved: Boolean,
+    isFollowingAuthor: Boolean,
+    authorFollowsMe: Boolean,
+    authorOnline: Boolean,
+    authorShowDot: Boolean,
     viewModel: WeConnectViewModel,
     onAuthorClick: () -> Unit,
+    onFollowAuthorClick: () -> Unit,
+    onChatAuthorClick: () -> Unit,
     onHashtagClick: (String) -> Unit,
     onLikeClick: () -> Unit,
     onCommentClick: () -> Unit,
@@ -554,19 +959,55 @@ private fun PostCard(
                     WeConnectAvatar(
                         displayName = post.authorName,
                         avatarBase64 = post.authorAvatarBase64,
-                        size = 42.dp
+                        size = 42.dp,
+                        showOnlineDot = authorShowDot,
+                        isOnline = authorOnline
                     )
                     Spacer(Modifier.width(10.dp))
                     Column {
                         Text(
                             text = post.authorName,
                             style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = "@${post.authorUsername} · ${formatRelativeTime(post.createdAt)}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                if (post.authorId != myUid) {
+                    Surface(
+                        onClick = onFollowAuthorClick,
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isFollowingAuthor) MaterialTheme.colorScheme.secondaryContainer else WhatsAppEmerald.copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, if (isFollowingAuthor) MaterialTheme.colorScheme.outline else WhatsAppEmerald)
+                    ) {
+                        Text(
+                            text = when {
+                                isFollowingAuthor -> "Following"
+                                authorFollowsMe -> "Follow Back"
+                                else -> "+ Follow"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isFollowingAuthor) MaterialTheme.colorScheme.onSecondaryContainer else WhatsAppEmerald,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(onClick = onChatAuthorClick, modifier = Modifier.size(34.dp)) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = "Chat with ${post.authorName}",
+                            tint = WhatsAppTeal,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -588,6 +1029,11 @@ private fun PostCard(
                                 onClick = { menuExpanded = false; onDeleteClick() }
                             )
                         } else {
+                            DropdownMenuItem(
+                                text = { Text("Message @${post.authorUsername}") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) },
+                                onClick = { menuExpanded = false; onChatAuthorClick() }
+                            )
                             DropdownMenuItem(
                                 text = { Text("Report Post") },
                                 leadingIcon = { Icon(Icons.Default.Flag, contentDescription = null) },
